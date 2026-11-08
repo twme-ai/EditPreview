@@ -1,0 +1,18 @@
+name: EditPreview
+version: '${version}'
+main: dev.twme.editpreview.EditPreviewPlugin
+api-version: '1.21'
+description: WorldEdit / FAWE 的選區邊框與編輯預覽（-pev、恆預覽、打字與筆刷即時預覽）
+authors: [twme]
+# FAWE 也宣告 provides: [WorldEdit]
+depend: [WorldEdit]
+commands:
+  pev:
+    description: WorldEdit 預覽
+    usage: /pev help
+    aliases: [editpreview]
+    permission: editpreview.use
+permissions:
+  editpreview.use:
+    description: 使用預覽
+    default: true

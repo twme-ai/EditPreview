@@ -3,3 +3,4 @@ build/
 .work/
 server/
 .kotlin/
+.claude/

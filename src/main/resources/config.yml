@@ -1,0 +1,13 @@
+# 一次試跑最多收幾格（超過的寫入仍然不會寫進世界，只是不顯示）
+max-capture: 1000000
+# 最多送幾格假方塊給玩家（超過時留離玩家最近的）
+max-display: 150000
+# 打字預覽：選區超過這個體積就暫停（按 Enter 仍會試跑）
+live-max-volume: 262144
+# 筆刷預覽：筆刷大小超過這個就不預覽
+brush-max-size: 32
+# 新玩家的預設
+defaults:
+  always: false
+  outline: true
+  brush: true
