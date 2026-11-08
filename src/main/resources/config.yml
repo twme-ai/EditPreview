@@ -6,6 +6,9 @@ max-display: 150000
 live-max-volume: 262144
 # Brush preview: not shown for brushes larger than this
 brush-max-size: 32
+# Dry-run previews (-pev / --pev, /pev mask, /pev pattern) disappear after this many seconds (0 = keep until cleared).
+# Per command: -pev 30 keeps that preview for 30 s, -pev 0 until cleared.
+dry-run-timeout: 5
 # Lime-glass flash when a selection is made
 selection-flash:
   # duration in ticks (20 = 1 second)
@@ -16,5 +19,7 @@ selection-flash:
 defaults:
   always: false
   brush: true
+  live-mask: true       # always-preview typing: //replace mask as lime glass
+  live-pattern: true    # always-preview typing: //set / //replace pattern as real blocks
   selection-flash: true # independent of always-preview
   carve: true           # carve the preview around the player's line of sight and body

@@ -21,8 +21,21 @@ chat(){
   done
 }
 # typeonly: open chat and type without sending (typing preview)
-typeonly(){ sync; xdotool key t; sleep 0.6; xdotool type --delay 40 "$1"; }
-typemore(){ xdotool type --delay 40 "$1"; }
+typeonly(){ sync; xdotool key t; sleep 0.6; TYPED="$1"; xdotool type --delay 40 "$1"; typed_wait; }
+typemore(){ TYPED="$TYPED$1"; xdotool type --delay 40 "$1"; typed_wait; }
+# typed_wait: wait until the server has the whole chat buffer; if the last completion request got lost, nudge the client
+# (type a space and delete it) so it asks again
+typed_wait(){
+  for n in 1 2 3; do
+    for i in $(seq 10); do
+      dbg source >/dev/null
+      grep -a PEV_DEBUG "$LOG" | tail -1 | grep -qF "typed=$TYPED liveError=" && return 0
+      sleep 0.2
+    done
+    xdotool key space; sleep 0.1; xdotool key BackSpace
+  done
+  return 0
+}
 esc(){ xdotool key Escape; sleep 0.4; }
 # dbg FIELD: read one field of pev debug
 dbg(){
@@ -33,6 +46,8 @@ dbg(){
 }
 # dbgline: print the whole pev debug line (used on failures)
 dbgline(){ dbg source >/dev/null; echo "  $(grep -a PEV_DEBUG "$LOG" | tail -1 | sed "s/.*PEV_DEBUG //")"; }
+# lastis CMD: the dry-run command to apply is exactly CMD (may contain spaces)
+lastis(){ dbg source >/dev/null; grep -a PEV_DEBUG "$LOG" | tail -1 | grep -qF "last=$1 entities="; }
 # isblock X Y Z ID: is that block in the world ID
 isblock(){
   local n0=$(grep -acE 'Test (passed|failed)' "$LOG")

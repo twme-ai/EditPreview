@@ -28,6 +28,8 @@ final class PlayerState {
 
   boolean always;
   boolean brush = true;
+  /** Always-preview typing stages: //replace mask as lime glass / pattern result as real blocks */
+  boolean liveMask = true, livePattern = true;
   /** Flash new selections as lime glass (independent of always-preview) */
   boolean selectFlash = true;
   /** Carve the preview around the player's line of sight and body */
@@ -38,6 +40,8 @@ final class PlayerState {
   String selKey;
   boolean selSeen;
   long flashUntil;
+  /** Dry-run preview (COMMAND) expires at this tick (0 = never) */
+  long commandUntil;
 
   /** Armed dry-run (read from WorldEdit threads) */
   volatile Capture armed;

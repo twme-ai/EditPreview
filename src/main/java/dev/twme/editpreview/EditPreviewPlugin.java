@@ -8,6 +8,8 @@ import com.sk89q.worldedit.bukkit.BukkitAdapter;
 import com.sk89q.worldedit.math.BlockVector3;
 import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldedit.world.block.BlockState;
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -22,6 +24,7 @@ import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.NamespacedKey;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
@@ -41,12 +44,12 @@ import org.bukkit.plugin.java.JavaPlugin;
 /**
  * Block previews for WorldEdit / FAWE:
  * <ul>
- *   <li>Add -pev (or --pev) to a command, or turn on always-preview (/pev always): the command only dry-runs, the result is
- *       shown with fake blocks, and nothing is written until [Apply]. Masks and replace show lime glass.
+ *   <li>Add -pev (or --pev) to a command: the command only dry-runs, the result is shown with fake blocks, and nothing is
+ *       written until [Apply]. Masks and replace show lime glass. Without the flag, commands always run for real.
  *   <li>A newly made selection (any shape) briefly flashes as lime glass (/pev select).
  *   <li>Fake blocks are carved around the player's line of sight and body, so the preview never blocks clicking (/pev carve).
- *   <li>Typing -pev in chat (before pressing Enter) already previews; in always-preview, //set and //replace preview while
- *       typing, and holding a brush previews the stroke at the aimed block.
+ *   <li>Typing -pev in chat (before pressing Enter) already previews; in always-preview (/pev always), //set and //replace
+ *       preview while typing (Enter still executes) and holding a brush previews the stroke at the aimed block.
  * </ul>
  */
 public final class EditPreviewPlugin extends JavaPlugin implements Listener, TabExecutor {
@@ -73,10 +76,10 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   private final Map<UUID, PlayerState> states = new ConcurrentHashMap<>();
   private WeHook hook;
   private boolean fawe;
-  private int maxCapture, maxDisplay, liveMax, flashTicks, flashMax;
+  private int maxCapture, maxDisplay, liveMax, flashTicks, flashMax, dryRunTicks;
   private double brushMax;
   private long tick;
-  private NamespacedKey kAlways, kBrush, kStyle, kSelect, kCarve;
+  private NamespacedKey kAlways, kBrush, kStyle, kSelect, kCarve, kLiveMask, kLivePattern;
 
   @Override
   public void onEnable() {
@@ -86,12 +89,15 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     liveMax = getConfig().getInt("live-max-volume", 262_144);
     brushMax = getConfig().getDouble("brush-max-size", 32);
     flashTicks = getConfig().getInt("selection-flash.ticks", 60);
+    dryRunTicks = (int) Math.round(getConfig().getDouble("dry-run-timeout", 5) * 20);
     flashMax = getConfig().getInt("selection-flash.max-volume", 262_144);
     kAlways = new NamespacedKey(this, "always");
     kBrush = new NamespacedKey(this, "brush");
     kStyle = new NamespacedKey(this, "style");
     kSelect = new NamespacedKey(this, "select");
     kCarve = new NamespacedKey(this, "carve");
+    kLiveMask = new NamespacedKey(this, "live_mask");
+    kLivePattern = new NamespacedKey(this, "live_pattern");
     fawe = Bukkit.getPluginManager().getPlugin("FastAsyncWorldEdit") != null;
     if (fawe) {
       try {
@@ -129,30 +135,70 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
 
   // ---------------- players ----------------
 
+  /**
+   * Player settings live in plugins/EditPreview/players/&lt;uuid&gt;.yml and are written immediately on every change, so they
+   * survive crashes and world resets. Values from older versions (player PDC) are migrated on first join.
+   */
+  private File settingsFile(java.util.UUID id) {
+    return new File(new File(getDataFolder(), "players"), id + ".yml");
+  }
+
   private PlayerState join(Player p) {
     PlayerState st = new PlayerState(p);
+    File f = settingsFile(p.getUniqueId());
+    YamlConfiguration y = f.isFile() ? YamlConfiguration.loadConfiguration(f) : new YamlConfiguration();
     var pdc = p.getPersistentDataContainer();
-    st.always = pdc.getOrDefault(kAlways, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.always", false) ? 1 : 0)) == 1;
-    st.brush = pdc.getOrDefault(kBrush, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.brush", true) ? 1 : 0)) == 1;
-    st.selectFlash = pdc.getOrDefault(kSelect, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.selection-flash", true) ? 1 : 0)) == 1;
-    st.carve = pdc.getOrDefault(kCarve, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.carve", true) ? 1 : 0)) == 1;
+    st.always = setting(y, pdc, "always", kAlways, "defaults.always", false);
+    st.brush = setting(y, pdc, "brush", kBrush, "defaults.brush", true);
+    st.selectFlash = setting(y, pdc, "selection-flash", kSelect, "defaults.selection-flash", true);
+    st.carve = setting(y, pdc, "carve", kCarve, "defaults.carve", true);
+    st.liveMask = setting(y, pdc, "live-mask", kLiveMask, "defaults.live-mask", true);
+    st.livePattern = setting(y, pdc, "live-pattern", kLivePattern, "defaults.live-pattern", true);
     st.fake.carving(st.carve);
+    String style = y.getString("style", pdc.getOrDefault(kStyle, PersistentDataType.STRING, "AUTO"));
     try {
-      st.style = PlayerState.StyleMode.valueOf(pdc.getOrDefault(kStyle, PersistentDataType.STRING, "AUTO"));
+      st.style = PlayerState.StyleMode.valueOf(style.toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException e) {
       st.style = PlayerState.StyleMode.AUTO;
     }
     states.put(p.getUniqueId(), st);
+    if (!f.isFile() && hasOldSettings(pdc)) save(st); // migrate from the old per-player PDC storage
     return st;
   }
 
+  /** File value, else the old PDC value, else the config default. */
+  private boolean setting(YamlConfiguration y, org.bukkit.persistence.PersistentDataContainer pdc, String path, NamespacedKey old,
+      String def, boolean fallback) {
+    if (y.isBoolean(path)) return y.getBoolean(path);
+    Byte b = pdc.get(old, PersistentDataType.BYTE);
+    return b != null ? b == 1 : getConfig().getBoolean(def, fallback);
+  }
+
+  private boolean hasOldSettings(org.bukkit.persistence.PersistentDataContainer pdc) {
+    for (NamespacedKey k : List.of(kAlways, kBrush, kStyle, kSelect, kCarve, kLiveMask, kLivePattern)) if (pdc.has(k)) return true;
+    return false;
+  }
+
   private void save(PlayerState st) {
-    var pdc = st.player.getPersistentDataContainer();
-    pdc.set(kAlways, PersistentDataType.BYTE, (byte) (st.always ? 1 : 0));
-    pdc.set(kBrush, PersistentDataType.BYTE, (byte) (st.brush ? 1 : 0));
-    pdc.set(kSelect, PersistentDataType.BYTE, (byte) (st.selectFlash ? 1 : 0));
-    pdc.set(kCarve, PersistentDataType.BYTE, (byte) (st.carve ? 1 : 0));
-    pdc.set(kStyle, PersistentDataType.STRING, st.style.name());
+    YamlConfiguration y = new YamlConfiguration();
+    y.set("name", st.player.getName());
+    y.set("always", st.always);
+    y.set("brush", st.brush);
+    y.set("selection-flash", st.selectFlash);
+    y.set("carve", st.carve);
+    y.set("live-mask", st.liveMask);
+    y.set("live-pattern", st.livePattern);
+    y.set("style", st.style.name().toLowerCase(Locale.ROOT));
+    File f = settingsFile(st.player.getUniqueId());
+    try {
+      f.getParentFile().mkdirs();
+      File tmp = new File(f.getParentFile(), f.getName() + ".tmp");
+      y.save(tmp);
+      java.nio.file.Files.move(tmp.toPath(), f.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+          java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+    } catch (IOException | RuntimeException e) {
+      getLogger().warning("Could not save settings of " + st.player.getName() + ": " + e);
+    }
   }
 
   private PlayerState state(Player p) {
@@ -191,6 +237,27 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   /** The preview flag: -pev or --pev. */
   static boolean isPev(String arg) {
     return arg.equalsIgnoreCase("-pev") || arg.equalsIgnoreCase("--pev");
+  }
+
+  /** A duration after the flag: -pev 30 (seconds; 0 = until cleared). */
+  static boolean isSeconds(String arg) {
+    return arg.matches("\\d{1,5}(\\.\\d+)?");
+  }
+
+  /** The command split into its words without the flag (and its duration); seconds = -1 when not given. */
+  record Flag(boolean on, double seconds, List<String> kept) {}
+
+  static Flag flag(String[] parts) {
+    boolean on = false;
+    double seconds = -1;
+    List<String> kept = new ArrayList<>();
+    for (int i = 0; i < parts.length; i++) {
+      if (i > 0 && isPev(parts[i])) {
+        on = true;
+        if (i + 1 < parts.length && isSeconds(parts[i + 1])) seconds = Double.parseDouble(parts[++i]);
+      } else kept.add(parts[i]);
+    }
+    return new Flag(on, seconds, kept);
   }
 
   /** The command (chat buffer) contains a standalone -pev / --pev. */
@@ -235,12 +302,9 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
 
-    boolean flag = false;
-    List<String> kept = new ArrayList<>();
-    for (int i = 0; i < parts.length; i++) {
-      if (i > 0 && isPev(parts[i])) flag = true;
-      else kept.add(parts[i]);
-    }
+    Flag fl = flag(parts);
+    boolean flag = fl.on();
+    List<String> kept = fl.kept();
     String clean = "/" + String.join(" ", kept).stripTrailing();
     if (flag) e.setMessage(clean);
     st.typed = null; // sent: typing preview is over
@@ -252,10 +316,11 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         Capture c = st.pendingConfirm;
         st.pendingConfirm = null;
         st.armed = new Capture(p.getUniqueId(), c.command, c.style, c.applicable, c.explicit, maxCapture);
+        st.armed.seconds = c.seconds;
       }
       return;
     }
-    if (!flag && !st.always) return;
+    if (!flag) return; // without -pev, commands run for real (even in always-preview; its live preview is cleared once sent)
     if (NON_EDIT.contains(label) || label.startsWith("/sel") || label.startsWith("/br")) return;
     if (NEVER.contains(label)) {
       if (flag) {
@@ -265,6 +330,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
     st.armed = new Capture(p.getUniqueId(), clean, style(st, label, kept, p), true, flag, maxCapture);
+    st.armed.seconds = fl.seconds();
   }
 
   private Capture.Style style(PlayerState st, String label, List<String> args, Player p) {
@@ -306,6 +372,11 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         else if ((!st.always || !st.brush) && st.source == PlayerState.Source.BRUSH) st.clearPreview();
         if (tick % 4 == 0) selection(st);
         if (st.source == PlayerState.Source.SELECTION && tick >= st.flashUntil) st.clearPreview();
+        if (st.source == PlayerState.Source.COMMAND && st.commandUntil > 0 && tick >= st.commandUntil) {
+          st.clearPreview();
+          st.lastCommand = null;
+          st.player.sendActionBar(Component.text("Preview expired (nothing was written)", NamedTextColor.GRAY));
+        }
         if (tick % 2 == 0) st.fake.carve();
         st.fake.flush();
       } catch (Throwable t) {
@@ -363,10 +434,12 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
     show(st, writes, c.style, PlayerState.Source.COMMAND);
+    if (c.seconds >= 0) st.commandUntil = c.seconds == 0 ? 0 : tick + Math.max(1, Math.round(c.seconds * 20));
     st.lastCommand = c.applicable ? c.command : null;
     Component m = Component.text("Dry-run ", NamedTextColor.GRAY)
         .append(Component.text(c.command, NamedTextColor.WHITE))
-        .append(Component.text(": " + String.format("%,d", writes.size()) + " blocks (not written yet)", NamedTextColor.GRAY));
+        .append(Component.text(": " + String.format("%,d", writes.size()) + " blocks (not written yet"
+            + (st.commandUntil > 0 ? ", disappears in " + fmtSeconds((st.commandUntil - tick) / 20.0) + " s" : "") + ")", NamedTextColor.GRAY));
     if (c.overflow) m = m.append(Component.text(" Limit exceeded, only the first " + String.format("%,d", maxCapture) + " blocks were captured", NamedTextColor.GOLD));
     m = m.append(Component.text("  "));
     if (c.applicable) m = m.append(button("[Apply]", NamedTextColor.GREEN, "/pev apply", "Run the command for real, as previewed")).append(Component.text(" "));
@@ -392,6 +465,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     Build.Result r = Build.build(writes, style, loc.getX(), loc.getY(), loc.getZ(), maxDisplay);
     st.fake.show(p.getWorld(), r.fake());
     st.source = src;
+    st.commandUntil = src == PlayerState.Source.COMMAND && dryRunTicks > 0 ? tick + dryRunTicks : 0;
     if (r.truncated()) p.sendActionBar(Component.text("Preview too large: showing only the " + String.format("%,d", maxDisplay) + " blocks nearest to you", NamedTextColor.GOLD));
   }
 
@@ -418,7 +492,8 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       st.typedDone = t;
       return;
     }
-    Live.Out out = Live.compute(st.player, t, fawe, liveMax);
+    // with -pev typed, every stage is previewed; otherwise follow /pev live mask|pattern
+    Live.Out out = Live.compute(st.player, t, fawe, liveMax, pev || st.liveMask, pev || st.livePattern);
     if (out == Live.NOT_LIVE && pev) {
       typedRun(st, t, now); // other commands: dry-run once typing pauses
       return;
@@ -454,8 +529,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       if (st.source == PlayerState.Source.LIVE) st.clearPreview();
       return;
     }
-    List<String> kept = new ArrayList<>();
-    for (int i = 0; i < parts.length; i++) if (i == 0 || !isPev(parts[i])) kept.add(parts[i]);
+    List<String> kept = flag(parts).kept();
     if (NEVER.contains(label)) {
       p.sendActionBar(Component.text("This command cannot be previewed", NamedTextColor.RED));
       return;
@@ -547,7 +621,8 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         PlayerState st = state(Bukkit.getPlayerExact(args[1]));
         sender.sendMessage("PEV_DEBUG source=" + st.source + " fake=" + st.fake.size()
             + " glass=" + st.fake.count(org.bukkit.Material.LIME_STAINED_GLASS) + " armed=" + (st.armed != null)
-            + " always=" + st.always + " last=" + st.lastCommand
+            + " always=" + st.always + " brush=" + st.brush + " select=" + st.selectFlash + " carve=" + st.carve
+            + " livemask=" + st.liveMask + " livepattern=" + st.livePattern + " style=" + st.style + " last=" + st.lastCommand
             + " entities=" + displayCount(st.player) + " cut=" + st.fake.carved() + " typed=" + st.typed + " liveError=" + Live.lastError);
         return true;
       }
@@ -565,8 +640,25 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         }
         save(st);
         info(p, Component.text("Always-preview: " + (st.always
-                ? "on (WorldEdit commands only dry-run until you click [Apply]; typing and brushes preview live)" : "off"),
+                ? "on (typing //set, //replace and aiming brushes preview live; Enter still executes)" : "off"),
             st.always ? NamedTextColor.GREEN : NamedTextColor.GRAY));
+      }
+      case "live" -> {
+        String stage = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "";
+        String[] rest = args.length > 1 ? java.util.Arrays.copyOfRange(args, 1, args.length) : new String[0];
+        switch (stage) {
+          case "mask" -> st.liveMask = toggle(rest, st.liveMask);
+          case "pattern" -> st.livePattern = toggle(rest, st.livePattern);
+          case "" -> { }
+          default -> {
+            info(p, Component.text("Usage: /pev live <mask|pattern> [on|off]", NamedTextColor.RED));
+            return true;
+          }
+        }
+        save(st);
+        st.typedDone = null; // recompute the typing preview with the new setting
+        info(p, Component.text("Typing preview in always-preview: mask (lime glass) " + onOff(st.liveMask) + ", pattern (real blocks) "
+            + onOff(st.livePattern) + (st.always ? "" : " — takes effect with /pev always on"), NamedTextColor.GRAY));
       }
       case "select" -> {
         st.selectFlash = toggle(args, st.selectFlash);
@@ -624,7 +716,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         }
         String text = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
         String buffer = sub.equals("mask") ? "//replace " + text : "//set " + text;
-        Live.Out out = Live.compute(p, buffer, fawe, maxCapture);
+        Live.Out out = Live.compute(p, buffer, fawe, maxCapture, true, true);
         if (out == null) {
           info(p, Component.text("Could not parse: " + text, NamedTextColor.RED));
           return true;
@@ -650,6 +742,10 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     return p.getNearbyEntities(64, 64, 64).stream().filter(e -> e instanceof org.bukkit.entity.Display).count();
   }
 
+  private static String fmtSeconds(double s) {
+    return s == Math.rint(s) ? String.valueOf((long) s) : String.format(Locale.ROOT, "%.1f", s);
+  }
+
   private static String onOff(boolean b) {
     return b ? "on" : "off";
   }
@@ -665,15 +761,18 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
 
   private void help(Player p, PlayerState st) {
     String[][] lines = {
-        {"/pev always [on|off]", "Always-preview: WorldEdit commands only dry-run; //set, //replace and brushes preview live (now "
+        {"/pev always [on|off]", "Always-preview: //set, //replace and brushes preview live while typing / aiming; Enter still executes (now "
             + onOff(st.always) + ")"},
-        {"<WorldEdit command> -pev", "Dry-run just this command (--pev works too; previews while typing)"},
+        {"<WorldEdit command> -pev [seconds]", "Dry-run just this command (--pev works too; previews while typing; the preview stays "
+            + fmtSeconds(dryRunTicks / 20.0) + " s unless you give seconds, 0 = until cleared)"},
         {"/pev apply", "Run the last dry-run for real"},
         {"/pev clear", "Clear the preview"},
         {"/pev mask <mask>", "Show blocks in the selection matching the mask as lime glass"},
         {"/pev pattern <pattern>", "Preview the selection filled with the pattern"},
         {"/pev style auto|blocks|glass", "Dry-run display style (auto: lime glass for masks and replace)"},
         {"/pev brush [on|off]", "Brush preview in always-preview (now " + onOff(st.brush) + ")"},
+        {"/pev live <mask|pattern> [on|off]", "Typing preview stages in always-preview: //replace mask as lime glass (now "
+            + onOff(st.liveMask) + "), //set / //replace pattern as real blocks (now " + onOff(st.livePattern) + ")"},
         {"/pev select [on|off]", "Briefly flash new selections as lime glass (now " + onOff(st.selectFlash) + ")"},
         {"/pev carve [on|off]", "Carve the preview around your line of sight and body (now " + onOff(st.carve) + ")"},
     };
@@ -687,7 +786,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
     if (args.length == 1) {
       List<String> out = new ArrayList<>();
-      for (String s : List.of("always", "apply", "clear", "mask", "pattern", "style", "brush", "select", "carve", "help"))
+      for (String s : List.of("always", "apply", "clear", "mask", "pattern", "style", "brush", "live", "select", "carve", "help"))
         if (s.startsWith(args[0].toLowerCase(Locale.ROOT))) out.add(s);
       return out;
     }
@@ -695,9 +794,11 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return switch (args[0].toLowerCase(Locale.ROOT)) {
         case "always", "brush", "select", "carve" -> List.of("on", "off");
         case "style" -> List.of("auto", "blocks", "glass");
+        case "live" -> List.of("mask", "pattern");
         default -> List.of();
       };
     }
+    if (args.length == 3 && args[0].equalsIgnoreCase("live")) return List.of("on", "off");
     return List.of();
   }
 

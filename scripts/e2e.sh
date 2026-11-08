@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# End-to-end: selection flash, -pev dry-run and apply, replace glass, gmask, always-preview (typing, Enter), brush,
-# typing -pev / --pev, carving, FAWE magic select
+# End-to-end: selection flash, -pev dry-run and apply, replace glass, gmask, always-preview (typing, Enter executes), brush,
+# typing -pev / --pev, carving, FAWE magic select, dry-run expiry
 . "$(dirname "$0")/lib.sh"
 cmd "gamemode creative $NAME"
 cmd "time set noon"
@@ -39,7 +39,7 @@ ok select_flash_again 'waitfor "[ \"\$(dbg source)\" = SELECTION ]" 3'
 ok select_flash_ends2 'waitfor "[ \"\$(dbg source)\" = NONE ]" 6'
 
 # 2. -pev: dry-run only, shows the resulting blocks (not glass)
-chat "//set oak_planks -pev"
+chat "//set oak_planks -pev 60"
 ok pev_source 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8'
 ok pev_blocks '[ "$(dbg fake)" -gt 0 ] && [ "$(dbg glass)" = 0 ]'
 ok pev_world_untouched 'isblock 0 -58 0 air && isblock 0 -60 0 stone'
@@ -61,7 +61,7 @@ chat "//undo"
 ok undo_once 'waitfor "isblock 0 -58 0 air" 6 && isblock 0 -60 0 stone'
 
 # 5. replace: lime glass (only the 49 stone blocks)
-chat "//replace stone gold_block --pev"
+chat "//replace stone gold_block --pev 60"
 ok replace_glass 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && [ "$(dbg glass)" = 49 ]'
 ok replace_untouched 'isblock 0 -60 0 stone'
 shot 03-replace-glass
@@ -69,7 +69,7 @@ chat "/pev clear"
 
 # 6. gmask: //set only touches gmask matches, shown as glass
 chat "//gmask stone"
-chat "//set gold_block -pev"
+chat "//set gold_block -pev 60"
 ok gmask_glass 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && [ "$(dbg glass)" = 49 ]'
 chat "/pev clear"
 
@@ -90,12 +90,40 @@ shot 05-live-mask
 typemore " diamond_block"
 ok live_pattern 'waitfor "[ \"\$(dbg glass)\" = 0 ] && [ \"\$(dbg fake)\" = 49 ]" 5'
 shot 06-live-pattern
+# Enter without -pev executes for real (no dry-run) and the live preview goes away
 xdotool key Return
-ok always_enter_preview 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && isblock 0 -60 0 stone'
-chat "/pev apply"
-ok always_apply 'waitfor "isblock 0 -60 0 diamond_block" 6'
+ok always_enter_executes 'waitfor "isblock 0 -60 0 diamond_block" 8'
+ok always_enter_cleared 'waitfor "[ \"\$(dbg source)\" = NONE ] && [ \"\$(dbg armed)\" = false ]" 5'
 chat "//undo"
 ok always_undo 'waitfor "isblock 0 -60 0 stone" 6'
+# with -pev it still only dry-runs
+chat "//set glowstone -pev 60"
+ok always_pev_dryrun 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && isblock 0 -60 0 stone && isblock 0 -58 0 air'
+chat "/pev clear"
+
+# 8b. The two typing stages can be turned off separately (/pev live mask|pattern)
+chat "/pev live pattern off"
+typeonly "//replace stone diamond_block"
+ok live_pattern_off_mask 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg glass)\" = 49 ]" 5'
+esc
+typeonly "//set glowstone"
+ok live_pattern_off_set 'sleep 1.5; [ "$(dbg source)" = NONE ]'
+esc
+chat "/pev live pattern on"
+chat "/pev live mask off"
+typeonly "//replace stone"
+ok live_mask_off 'sleep 1.5; [ "$(dbg source)" = NONE ]'
+typemore " diamond_block"
+ok live_mask_off_pattern 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg glass)\" = 0 ] && [ \"\$(dbg fake)\" = 49 ]" 5'
+esc
+chat "/pev live mask on"
+# 8c. Patterns registered by other plugins through WorldEdit's pattern factory (here: FAWE's #linear)
+if grep -aq 'Preview enabled (FastAsyncWorldEdit)' "$LOG"; then
+  typeonly "//set #linear[gold_block,diamond_block]"
+  ok live_custom_pattern 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg fake)\" -gt 49 ]" 5 && [ "$(dbg glass)" = 0 ]'
+  shot 10-custom-pattern
+  esc
+fi
 
 # 9. Brush: aiming previews (nothing written), a real stroke writes as usual
 chat "//sel"
@@ -140,7 +168,7 @@ if grep -aq 'Preview enabled (FastAsyncWorldEdit)' "$LOG"; then
   look 0 -60 -14 0 -58 0
   chat "//sel fuzzy"
   chat "//pos1 0,-60,0"
-  chat "//set gold_block -pev"
+  chat "//set gold_block -pev 60"
   ok fuzzy_pev 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && [ "$(dbg fake)" = 49 ] && isblock 0 -60 0 stone'
   shot 08-fuzzy
   chat "/pev clear"
@@ -151,4 +179,27 @@ if grep -aq 'Preview enabled (FastAsyncWorldEdit)' "$LOG"; then
   chat "/pev always off"
   chat "//sel cuboid"
 fi
+
+# 12. Dry-run previews expire: default dry-run-timeout (5 s), per command -pev N, -pev 0 = until cleared
+chat "//pos1 -3,-60,-3"
+chat "//pos2 3,-56,3"
+chat "//set oak_planks --pev"
+ok expire_start 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && lastis "//set oak_planks"'
+T0=$(date +%s)
+ok expire_default 'waitfor "[ \"\$(dbg source)\" = NONE ]" 8 && [ $(( $(date +%s) - T0 )) -ge 3 ] && [ "$(dbg last)" = null ]'
+ok expire_untouched 'isblock 0 -58 0 air && isblock 0 -60 0 stone'
+chat "/pev apply"
+ok expire_no_apply 'sleep 1; isblock 0 -58 0 air'
+chat "//set oak_planks -pev 12"
+ok expire_n_start 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && lastis "//set oak_planks"'
+T0=$(date +%s)
+ok expire_n_kept 'sleep 8; [ "$(dbg source)" = COMMAND ]'
+ok expire_n_cleared 'waitfor "[ \"\$(dbg source)\" = NONE ]" 8 && [ $(( $(date +%s) - T0 )) -ge 10 ]'
+chat "//set oak_planks --pev 0"
+ok expire_zero_start 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8'
+ok expire_zero_kept 'sleep 8; [ "$(dbg source)" = COMMAND ] && isblock 0 -58 0 air'
+chat "/pev apply"
+ok expire_zero_apply 'waitfor "isblock 0 -58 0 oak_planks" 6'
+chat "//undo"
+ok expire_zero_undo 'waitfor "isblock 0 -58 0 air" 6'
 done_

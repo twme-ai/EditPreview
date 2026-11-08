@@ -42,14 +42,20 @@ final class Live {
   static volatile String lastError;
 
   static final Out NOT_LIVE = new Out(Map.of(), Capture.Style.BLOCKS, null);
+  /** The stage being typed has its preview turned off (/pev live): show nothing */
+  static final Out OFF = new Out(Map.of(), Capture.Style.BLOCKS, null);
 
-  static Out compute(Player p, String buffer, boolean fawe, int maxVolume) {
+  /**
+   * @param useMask preview the mask stage (//replace with only the mask, or with the pattern stage turned off) as lime glass
+   * @param usePattern preview the pattern stage (//set, //replace with a pattern) as real blocks
+   */
+  static Out compute(Player p, String buffer, boolean fawe, int maxVolume, boolean useMask, boolean usePattern) {
     var actor = BukkitAdapter.adapt(p);
     LocalSession session = WorldEdit.getInstance().getSessionManager().getIfPresent(actor);
-    return WeRequest.with(BukkitAdapter.adapt(p.getWorld()), session, () -> compute0(p, buffer, fawe, maxVolume));
+    return WeRequest.with(BukkitAdapter.adapt(p.getWorld()), session, () -> compute0(p, buffer, fawe, maxVolume, useMask, usePattern));
   }
 
-  private static Out compute0(Player p, String buffer, boolean fawe, int maxVolume) {
+  private static Out compute0(Player p, String buffer, boolean fawe, int maxVolume, boolean useMask, boolean usePattern) {
     String b = buffer.startsWith("/") ? buffer.substring(1) : buffer;
     String[] parts = b.split(" ", -1);
     String label = EditPreviewPlugin.baseLabel(parts[0]);
@@ -58,7 +64,11 @@ final class Live {
     List<String> args = new ArrayList<>();
     for (int i = 1; i < parts.length; i++) {
       String a = parts[i];
-      if (a.isEmpty() || EditPreviewPlugin.isPev(a)) continue;
+      if (a.isEmpty()) continue;
+      if (EditPreviewPlugin.isPev(a)) {
+        if (i + 1 < parts.length && EditPreviewPlugin.isSeconds(parts[i + 1])) i++; // -pev N: preview duration
+        continue;
+      }
       if (a.length() == 2 && a.charAt(0) == '-' && Character.isLetter(a.charAt(1))) continue; // flag
       args.add(a);
     }
@@ -70,6 +80,8 @@ final class Live {
       maskText = args.get(0);
       patternText = args.get(1);
     }
+    if (!usePattern) patternText = null; // //replace falls back to the mask stage; //set shows nothing
+    if (patternText == null && (maskText == null || !useMask)) return OFF;
 
     var actor = BukkitAdapter.adapt(p);
     LocalSession session = WorldEdit.getInstance().getSessionManager().getIfPresent(actor);
