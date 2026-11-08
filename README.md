@@ -21,7 +21,13 @@ Previews are sent only to the player who made them (fake blocks), never touch th
   it for 30 s, `-pev 0` until you clear or apply it. Commands without the flag always run for real.
   - **Preview while typing**: as soon as `-pev` appears in the chat box (before Enter), the preview starts.
     `//set` and `//replace` update on every keystroke; other commands (`//walls`, `//stack`, `//smooth`, …) are dry-run
-    once in capture mode after typing pauses for 0.6 s. Deleting `-pev` clears the preview.
+    once in capture mode after typing pauses for 0.6 s.
+    - Like a dry-run, a typed preview disappears after 5 seconds (or `-pev N` seconds, `-pev 0` = never); keep typing to
+      preview again. Changing the selection clears it at once.
+    - You can go back and edit arguments in front of an already typed `-pev` (e.g. move the cursor left and replace the
+      block in `//set stone -pev`): the preview follows. The client only sends the text up to the cursor and moving the
+      cursor looks the same as deleting, so the rest of the line is kept until you type; for the same reason, deleting
+      `-pev` doesn't clear the preview at once (it expires, or press Esc and `/pev clear`).
     Commands that change the clipboard (`//cut`) or move the selection with `-s` (`//move`, `//stack`, `//paste`)
     are not dry-run while typing; press Enter to dry-run them.
 - **Always-preview** (`/pev always on`): live previews without typing the flag. Pressing Enter still runs the command
@@ -125,9 +131,9 @@ defaults:                # per-player defaults
 ## Building and testing
 
 ```sh
-./gradlew build           # build/libs/EditPreview-<version>.jar
+./gradlew build           # build/libs/EditPreview-<version>.jar (also runs the unit tests)
 scripts/restart.sh        # deploy to the test server and restart server + client
-scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 56 checks; WorldEdit 7.4.6: 53, FAWE-only checks skipped)
+scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 69 checks; WorldEdit 7.4.6: 66, FAWE-only checks skipped)
 scripts/persist.sh        # settings survive a server crash (kill -9)
 ```
 

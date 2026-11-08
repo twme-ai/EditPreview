@@ -234,38 +234,22 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     return c >= 0 ? l.substring(c + 1) : l;
   }
 
-  /** The preview flag: -pev or --pev. */
   static boolean isPev(String arg) {
-    return arg.equalsIgnoreCase("-pev") || arg.equalsIgnoreCase("--pev");
+    return PevFlag.isPev(arg);
   }
 
-  /** A duration after the flag: -pev 30 (seconds; 0 = until cleared). */
   static boolean isSeconds(String arg) {
-    return arg.matches("\\d{1,5}(\\.\\d+)?");
+    return PevFlag.isSeconds(arg);
   }
 
-  /** The command split into its words without the flag (and its duration); seconds = -1 when not given. */
-  record Flag(boolean on, double seconds, List<String> kept) {}
-
-  static Flag flag(String[] parts) {
-    boolean on = false;
-    double seconds = -1;
-    List<String> kept = new ArrayList<>();
-    for (int i = 0; i < parts.length; i++) {
-      if (i > 0 && isPev(parts[i])) {
-        on = true;
-        if (i + 1 < parts.length && isSeconds(parts[i + 1])) seconds = Double.parseDouble(parts[++i]);
-      } else kept.add(parts[i]);
-    }
-    return new Flag(on, seconds, kept);
-  }
-
-  /** The command (chat buffer) contains a standalone -pev / --pev. */
   static boolean hasPev(String buffer) {
-    String[] parts = buffer.split(" ");
-    for (int i = 1; i < parts.length; i++) if (isPev(parts[i])) return true;
-    return false;
+    return PevFlag.hasPev(buffer);
   }
+
+  static PevFlag.Flag flag(String[] parts) {
+    return PevFlag.flag(parts);
+  }
+
 
   private static boolean hasFlag(List<String> args, char f) {
     for (int i = 1; i < args.size(); i++) {
@@ -302,7 +286,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
 
-    Flag fl = flag(parts);
+    PevFlag.Flag fl = flag(parts);
     boolean flag = fl.on();
     List<String> kept = fl.kept();
     String clean = "/" + String.join(" ", kept).stripTrailing();
@@ -354,8 +338,12 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     if (st == null) return;
     // Start with always-preview or once -pev is typed (keep recording after -pev is deleted, so the preview can be cleared)
     if (!st.always && st.typed == null && !hasPev(e.getBuffer())) return;
-    st.typed = e.getBuffer();
+    st.typed = withTail(st.typed, e.getBuffer());
     st.typedAt = System.currentTimeMillis();
+  }
+
+  static String withTail(String prev, String sent) {
+    return PevFlag.withTail(prev, sent);
   }
 
   // ---------------- every tick ----------------
@@ -376,6 +364,10 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
           st.clearPreview();
           st.lastCommand = null;
           st.player.sendActionBar(Component.text("Preview expired (nothing was written)", NamedTextColor.GRAY));
+        }
+        if (st.source == PlayerState.Source.LIVE && st.liveUntil > 0 && tick >= st.liveUntil) {
+          st.clearPreview(); // typedDone stays, so the same text is not previewed again; keep typing to preview again
+          st.player.sendActionBar(Component.text("Preview expired (keep typing to preview again)", NamedTextColor.GRAY));
         }
         if (tick % 2 == 0) st.fake.carve();
         st.fake.flush();
@@ -424,6 +416,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         return;
       }
       show(st, writes, c.style, PlayerState.Source.LIVE);
+      st.liveUntil = until(c.seconds);
       st.lastCommand = null;
       p.sendActionBar(Component.text("Preview " + c.command + ": " + String.format("%,d", writes.size()) + " blocks (Enter to dry-run)",
           NamedTextColor.AQUA));
@@ -434,7 +427,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
     show(st, writes, c.style, PlayerState.Source.COMMAND);
-    if (c.seconds >= 0) st.commandUntil = c.seconds == 0 ? 0 : tick + Math.max(1, Math.round(c.seconds * 20));
+    st.commandUntil = until(c.seconds);
     st.lastCommand = c.applicable ? c.command : null;
     Component m = Component.text("Dry-run ", NamedTextColor.GRAY)
         .append(Component.text(c.command, NamedTextColor.WHITE))
@@ -510,6 +503,8 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
     show(st, out.writes(), out.style(), PlayerState.Source.LIVE);
+    // a typed -pev preview expires like a dry-run (-pev N sets the seconds); the always-preview typing preview stays
+    st.liveUntil = pev ? until(flag(t.split(" ", -1)).seconds()) : 0;
     st.player.sendActionBar(Component.text("Preview" + (out.note() == null ? "" : " (" + out.note() + ")") + ": "
         + String.format("%,d", out.writes().size()) + " blocks", NamedTextColor.AQUA));
   }
@@ -541,6 +536,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     String clean = "/" + String.join(" ", kept).strip();
     Capture c = new Capture(p.getUniqueId(), clean, style(st, label, kept, p), true, false, maxCapture);
     c.live = true;
+    c.seconds = flag(parts).seconds();
     st.armed = c;
     // performCommand skips PlayerCommandPreprocessEvent; every write is captured by st.armed
     p.performCommand(clean.substring(1));
@@ -574,6 +570,8 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     }
     if (java.util.Objects.equals(key, st.selKey)) return;
     st.selKey = key;
+    // the selection changed: a typed (not yet sent) preview is outdated; it is computed again on the next keystroke
+    if (st.source == PlayerState.Source.LIVE) st.clearPreview();
     if (r == null || !st.selectFlash) return;
     if (st.source != PlayerState.Source.NONE && st.source != PlayerState.Source.SELECTION) return; // don't hide a real preview
     if (volume(r) > flashMax) return;
@@ -740,6 +738,12 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   /** Display entities near the player (for tests: the plugin must not spawn any). */
   private static long displayCount(Player p) {
     return p.getNearbyEntities(64, 64, 64).stream().filter(e -> e instanceof org.bukkit.entity.Display).count();
+  }
+
+  /** Expiry tick for a preview of the given seconds (-1 = config default, 0 = never). */
+  private long until(double seconds) {
+    if (seconds < 0) return dryRunTicks > 0 ? tick + dryRunTicks : 0;
+    return seconds == 0 ? 0 : tick + Math.max(1, Math.round(seconds * 20));
   }
 
   private static String fmtSeconds(double s) {

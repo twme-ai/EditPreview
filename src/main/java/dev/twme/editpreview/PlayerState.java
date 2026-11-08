@@ -42,6 +42,8 @@ final class PlayerState {
   long flashUntil;
   /** Dry-run preview (COMMAND) expires at this tick (0 = never) */
   long commandUntil;
+  /** Typed (not yet sent) -pev preview expires at this tick (0 = never) */
+  long liveUntil;
 
   /** Armed dry-run (read from WorldEdit threads) */
   volatile Capture armed;
