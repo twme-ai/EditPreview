@@ -1,11 +1,13 @@
 package dev.twme.editpreview;
 
 import com.destroystokyo.paper.event.server.AsyncTabCompleteEvent;
+import com.sk89q.worldedit.IncompleteRegionException;
 import com.sk89q.worldedit.LocalSession;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import com.sk89q.worldedit.math.BlockVector3;
+import com.sk89q.worldedit.regions.Region;
 import com.sk89q.worldedit.world.block.BlockState;
-import dev.twme.editpreview.render.Geo.Shape;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -37,31 +39,33 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * WorldEdit／FAWE 預覽：
+ * Block previews for WorldEdit / FAWE:
  * <ul>
- *   <li>選區邊框（發光的邊、第一點橘、第二點藍、尺寸標示）。
- *   <li>指令後加 -pev，或開著恆預覽（/pev always）：指令只試跑，結果用假方塊顯示，按 [套用] 才真的寫入。
- *       有遮罩或是 replace 時顯示綠色玻璃。
- *   <li>恆預覽中：打字時即時預覽 //set、//replace；拿著筆刷時預覽瞄準處刷下去的樣子。
+ *   <li>Add -pev (or --pev) to a command, or turn on always-preview (/pev always): the command only dry-runs, the result is
+ *       shown with fake blocks, and nothing is written until [Apply]. Masks and replace show lime glass.
+ *   <li>A newly made selection (any shape) briefly flashes as lime glass (/pev select).
+ *   <li>Fake blocks are carved around the player's line of sight and body, so the preview never blocks clicking (/pev carve).
+ *   <li>Typing -pev in chat (before pressing Enter) already previews; in always-preview, //set and //replace preview while
+ *       typing, and holding a brush previews the stroke at the aimed block.
  * </ul>
  */
 public final class EditPreviewPlugin extends JavaPlugin implements Listener, TabExecutor {
   private static final Set<String> NEVER = Set.of("/undo", "undo", "/redo", "redo", "/clearhistory", "clearhistory",
       "/cancel", "fcancel", "worldedit", "we", "fawe", "/fawe",
-      // 移除實體不經過方塊寫入，攔不下來
+      // entity removal does not go through block writes, so it cannot be intercepted
       "/butcher", "butcher", "/remove", "remove", "/rem", "/rement");
-  /** 不寫入世界的指令：不上膛（否則上膛期間玩家真的刷下去的筆刷會被當成預覽吞掉） */
+  /** Commands that don't write to the world: never arm (otherwise a real brush stroke during the arm window would be swallowed). */
   private static final Set<String> NON_EDIT = Set.of("/br", "br", "brush", "/brush", "tool", "/tool", "/sel", "sel", "/desel", "desel",
       "/pos1", "/pos2", "/hpos1", "/hpos2", "/chunk", "/wand", "/gmask", "gmask", "mask", "/mask", "material", "mat", "size", "range",
       "tracemask", "none", "/none", "/expand", "/contract", "/shift", "/outset", "/inset", "/size", "/count", "/distr", "/copy",
       "/schematic", "/schem", "schematic", "schem", "/clipboard", "/rotate", "/flip", "/clearclipboard", "/fast", "/perf", "/limit",
       "/timeout", "/toggleplace", "/searchitem", "/help", "/listchunks", "/calc", "/eval", "/drawsel", "/watchdog", "/reorder",
       "/sp", "superpickaxe", "/", ",", "/;", "/inspect", "/history", "/lazycopy",
-      // 移動玩家
+      // player movement
       "/ascend", "asc", "/descend", "desc", "/ceil", "ceil", "/thru", "thru", "/jumpto", "j", "/up", "up", "/unstuck", "!");
-  /** 打字中不自動試跑：會改剪貼簿 */
+  /** Not dry-run while typing: changes the clipboard. */
   private static final Set<String> TYPED_UNSAFE = Set.of("/cut", "/lazycut");
-  /** 打字中不自動試跑：帶 -s 會移動選區 */
+  /** Not dry-run while typing when -s is given: moves the selection. */
   private static final Set<String> SELECTION_FLAG = Set.of("/move", "/stack", "/paste");
   private static final Set<String> CONFIRM = Set.of("/confirm", "confirm");
   private static final Set<String> REPLACE_LIKE = Set.of("/replace", "/rep", "/re", "/replacenear", "replacenear", "/rn");
@@ -69,10 +73,10 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   private final Map<UUID, PlayerState> states = new ConcurrentHashMap<>();
   private WeHook hook;
   private boolean fawe;
-  private int maxCapture, maxDisplay, liveMax;
+  private int maxCapture, maxDisplay, liveMax, flashTicks, flashMax;
   private double brushMax;
   private long tick;
-  private NamespacedKey kAlways, kBox, kBrush, kStyle;
+  private NamespacedKey kAlways, kBrush, kStyle, kSelect, kCarve;
 
   @Override
   public void onEnable() {
@@ -81,16 +85,19 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     maxDisplay = getConfig().getInt("max-display", 150_000);
     liveMax = getConfig().getInt("live-max-volume", 262_144);
     brushMax = getConfig().getDouble("brush-max-size", 32);
+    flashTicks = getConfig().getInt("selection-flash.ticks", 60);
+    flashMax = getConfig().getInt("selection-flash.max-volume", 262_144);
     kAlways = new NamespacedKey(this, "always");
-    kBox = new NamespacedKey(this, "box");
     kBrush = new NamespacedKey(this, "brush");
     kStyle = new NamespacedKey(this, "style");
+    kSelect = new NamespacedKey(this, "select");
+    kCarve = new NamespacedKey(this, "carve");
     fawe = Bukkit.getPluginManager().getPlugin("FastAsyncWorldEdit") != null;
     if (fawe) {
       try {
         dev.twme.editpreview.fawe.FaweSupport.allowExtent(CaptureExtent.class, getLogger());
       } catch (LinkageError e) {
-        getLogger().warning("FAWE 版本不相容：" + e);
+        getLogger().warning("Incompatible FAWE version: " + e);
       }
     }
     hook = new WeHook(fawe, id -> {
@@ -106,7 +113,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     }
     for (Player p : Bukkit.getOnlinePlayers()) join(p);
     Bukkit.getScheduler().runTaskTimer(this, this::tick, 1, 1);
-    getLogger().info("預覽已啟用（" + (fawe ? "FastAsyncWorldEdit" : "WorldEdit") + "）");
+    getLogger().info("Preview enabled (" + (fawe ? "FastAsyncWorldEdit" : "WorldEdit") + ")");
   }
 
   @Override
@@ -120,14 +127,16 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     states.clear();
   }
 
-  // ---------------- 玩家 ----------------
+  // ---------------- players ----------------
 
   private PlayerState join(Player p) {
-    PlayerState st = new PlayerState(this, p);
+    PlayerState st = new PlayerState(p);
     var pdc = p.getPersistentDataContainer();
     st.always = pdc.getOrDefault(kAlways, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.always", false) ? 1 : 0)) == 1;
-    st.showBox = pdc.getOrDefault(kBox, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.box", true) ? 1 : 0)) == 1;
     st.brush = pdc.getOrDefault(kBrush, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.brush", true) ? 1 : 0)) == 1;
+    st.selectFlash = pdc.getOrDefault(kSelect, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.selection-flash", true) ? 1 : 0)) == 1;
+    st.carve = pdc.getOrDefault(kCarve, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.carve", true) ? 1 : 0)) == 1;
+    st.fake.carving(st.carve);
     try {
       st.style = PlayerState.StyleMode.valueOf(pdc.getOrDefault(kStyle, PersistentDataType.STRING, "AUTO"));
     } catch (IllegalArgumentException e) {
@@ -140,8 +149,9 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   private void save(PlayerState st) {
     var pdc = st.player.getPersistentDataContainer();
     pdc.set(kAlways, PersistentDataType.BYTE, (byte) (st.always ? 1 : 0));
-    pdc.set(kBox, PersistentDataType.BYTE, (byte) (st.showBox ? 1 : 0));
     pdc.set(kBrush, PersistentDataType.BYTE, (byte) (st.brush ? 1 : 0));
+    pdc.set(kSelect, PersistentDataType.BYTE, (byte) (st.selectFlash ? 1 : 0));
+    pdc.set(kCarve, PersistentDataType.BYTE, (byte) (st.carve ? 1 : 0));
     pdc.set(kStyle, PersistentDataType.STRING, st.style.name());
   }
 
@@ -166,24 +176,27 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     PlayerState st = states.get(e.getPlayer().getUniqueId());
     if (st == null) return;
     st.fake.forget();
-    st.previewBox = Shape.empty();
     st.source = PlayerState.Source.NONE;
-    st.outline.clear();
   }
 
-  // ---------------- 指令攔截 ----------------
+  // ---------------- command interception ----------------
 
-  /** 指令名稱：去掉命名空間（worldedit:/set → /set）、轉小寫。 */
+  /** Command label without namespace (worldedit:/set → /set), lower-cased. */
   static String baseLabel(String raw) {
     String l = raw.toLowerCase(Locale.ROOT);
     int c = l.indexOf(':');
     return c >= 0 ? l.substring(c + 1) : l;
   }
 
-  /** 指令（聊天欄內容）裡有獨立的 -pev */
+  /** The preview flag: -pev or --pev. */
+  static boolean isPev(String arg) {
+    return arg.equalsIgnoreCase("-pev") || arg.equalsIgnoreCase("--pev");
+  }
+
+  /** The command (chat buffer) contains a standalone -pev / --pev. */
   static boolean hasPev(String buffer) {
     String[] parts = buffer.split(" ");
-    for (int i = 1; i < parts.length; i++) if (parts[i].equalsIgnoreCase("-pev")) return true;
+    for (int i = 1; i < parts.length; i++) if (isPev(parts[i])) return true;
     return false;
   }
 
@@ -215,7 +228,8 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     PlayerState st = state(p);
     Capture armedNow = st.armed;
     if (armedNow != null && armedNow.live) {
-      // 打字試跑還在跑（FAWE 非同步）：這時送出的指令會被它收走，先排隊，試跑結束再送
+      // A typing dry-run is still running (FAWE is async): a command sent now would be captured by it.
+      // Queue it and send it once the dry-run has finished.
       e.setCancelled(true);
       st.queuedChat = msg;
       return;
@@ -224,16 +238,16 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     boolean flag = false;
     List<String> kept = new ArrayList<>();
     for (int i = 0; i < parts.length; i++) {
-      if (i > 0 && parts[i].equalsIgnoreCase("-pev")) flag = true;
+      if (i > 0 && isPev(parts[i])) flag = true;
       else kept.add(parts[i]);
     }
     String clean = "/" + String.join(" ", kept).stripTrailing();
     if (flag) e.setMessage(clean);
-    st.typed = null; // 送出了：打字預覽結束
-    st.typedDone = null; // 指令可能改了 gmask、選區：下次打一樣的字也要重算
+    st.typed = null; // sent: typing preview is over
+    st.typedDone = null; // the command may change the gmask or selection: recompute even for the same text
 
     if (CONFIRM.contains(label)) {
-      // FAWE 的大編輯要 //confirm：接著試跑剛才那個
+      // FAWE asks for //confirm on large edits: dry-run the pending command
       if (st.pendingConfirm != null && System.currentTimeMillis() < st.pendingUntil) {
         Capture c = st.pendingConfirm;
         st.pendingConfirm = null;
@@ -246,7 +260,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     if (NEVER.contains(label)) {
       if (flag) {
         e.setCancelled(true);
-        info(p, Component.text("這個指令不能預覽", NamedTextColor.RED));
+        info(p, Component.text("This command cannot be previewed", NamedTextColor.RED));
       }
       return;
     }
@@ -263,22 +277,22 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   }
 
   /**
-   * 客戶端打字時會一直要補全：恆預覽中記下聊天欄的內容，主執行緒停手後才算。
-   * Paper 用多條執行緒平行處理補全；放在 MONITOR 要等 WorldEdit 算完補全，算得慢的舊字串會蓋掉新的，
-   * 所以在最前面（LOWEST）就記下來。
+   * The client asks for completions on every keystroke: record the chat buffer and compute on the main thread once typing pauses.
+   * Paper handles completions on several threads in parallel; at MONITOR we would wait for WorldEdit's completions, and a slow
+   * older buffer could overwrite a newer one, so record it first (LOWEST).
    */
   @EventHandler(priority = EventPriority.LOWEST)
   public void onTab(AsyncTabCompleteEvent e) {
     if (!(e.getSender() instanceof Player p) || !e.isCommand()) return;
     PlayerState st = states.get(p.getUniqueId());
     if (st == null) return;
-    // 恆預覽、或指令裡打了 -pev 就開始打字預覽（之後刪掉 -pev 也要繼續記，才能把預覽收掉）
+    // Start with always-preview or once -pev is typed (keep recording after -pev is deleted, so the preview can be cleared)
     if (!st.always && st.typed == null && !hasPev(e.getBuffer())) return;
     st.typed = e.getBuffer();
     st.typedAt = System.currentTimeMillis();
   }
 
-  // ---------------- 每 tick ----------------
+  // ---------------- every tick ----------------
 
   private void tick() {
     tick++;
@@ -290,10 +304,12 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         if (st.always || st.typed != null) live(st, now);
         if (st.always && st.brush && tick % 3 == 0) brush(st);
         else if ((!st.always || !st.brush) && st.source == PlayerState.Source.BRUSH) st.clearPreview();
-        if (tick % 4 == 0) st.outline.show(st.showBox ? st.previewBox : Shape.empty());
+        if (tick % 4 == 0) selection(st);
+        if (st.source == PlayerState.Source.SELECTION && tick >= st.flashUntil) st.clearPreview();
+        if (tick % 2 == 0) st.fake.carve();
         st.fake.flush();
       } catch (Throwable t) {
-        getLogger().warning("預覽更新失敗（" + st.player.getName() + "）：" + t);
+        getLogger().warning("Preview update failed (" + st.player.getName() + "): " + t);
       }
     }
   }
@@ -308,9 +324,10 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       st.armed = null;
       finish(st, c);
     } else if (now - c.created > (fawe ? 4000 : 0)) {
-      // 沒有 EditSession：不是編輯指令，或 FAWE 在等 //confirm。
-      // 原版 WorldEdit 同步執行，指令那一 tick 沒建 EditSession 就是沒有；FAWE 非同步（剛開服時可能要一兩秒），給 4 秒——
-      // 太短的話試跑的指令會真的寫進世界；太長只是期間玩家真正的編輯（例如刷筆刷）也被收進預覽，所以寧可長。
+      // No EditSession: not an edit command, or FAWE is waiting for //confirm.
+      // Vanilla WorldEdit runs synchronously, so no EditSession in that tick means none at all. FAWE is async (a second or
+      // two right after startup), so allow 4 s: too short and the dry-run would really write to the world; too long only
+      // means a real edit in the meantime (e.g. a brush stroke) also ends up in the preview, so err on the long side.
       st.armed = null;
       if (!c.live) {
         st.pendingConfirm = c;
@@ -328,32 +345,32 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     Player p = st.player;
     Map<Long, BlockData> writes = convert(c.snapshot());
     if (c.live) {
-      // 打字試跑：當成打字預覽；玩家已經送出或關掉聊天欄就不顯示
+      // Typing dry-run: shown as a typing preview; skip it if the player already sent the command or closed chat
       if (writes.isEmpty() || st.typed == null || (st.source != PlayerState.Source.LIVE && st.source != PlayerState.Source.NONE
           && st.source != PlayerState.Source.COMMAND)) {
         if (st.source == PlayerState.Source.LIVE) st.clearPreview();
-        if (st.typed != null) p.sendActionBar(Component.text(c.command + "：沒有方塊會改變", NamedTextColor.GRAY));
+        if (st.typed != null) p.sendActionBar(Component.text(c.command + ": no blocks would change", NamedTextColor.GRAY));
         return;
       }
       show(st, writes, c.style, PlayerState.Source.LIVE);
       st.lastCommand = null;
-      p.sendActionBar(Component.text("預覽 " + c.command + "：" + String.format("%,d", writes.size()) + " 格（按 Enter 試跑）",
+      p.sendActionBar(Component.text("Preview " + c.command + ": " + String.format("%,d", writes.size()) + " blocks (Enter to dry-run)",
           NamedTextColor.AQUA));
       return;
     }
     if (writes.isEmpty()) {
-      if (c.explicit) info(p, Component.text("沒有方塊會改變（沒有寫入）", NamedTextColor.GRAY));
+      if (c.explicit) info(p, Component.text("No blocks would change (nothing written)", NamedTextColor.GRAY));
       return;
     }
     show(st, writes, c.style, PlayerState.Source.COMMAND);
     st.lastCommand = c.applicable ? c.command : null;
-    Component m = Component.text("試跑 ", NamedTextColor.GRAY)
+    Component m = Component.text("Dry-run ", NamedTextColor.GRAY)
         .append(Component.text(c.command, NamedTextColor.WHITE))
-        .append(Component.text("：" + String.format("%,d", writes.size()) + " 格（還沒寫入）", NamedTextColor.GRAY));
-    if (c.overflow) m = m.append(Component.text(" 超過上限，只收到前 " + String.format("%,d", maxCapture) + " 格", NamedTextColor.GOLD));
+        .append(Component.text(": " + String.format("%,d", writes.size()) + " blocks (not written yet)", NamedTextColor.GRAY));
+    if (c.overflow) m = m.append(Component.text(" Limit exceeded, only the first " + String.format("%,d", maxCapture) + " blocks were captured", NamedTextColor.GOLD));
     m = m.append(Component.text("  "));
-    if (c.applicable) m = m.append(button("[套用]", NamedTextColor.GREEN, "/pev apply", "照這個預覽真的執行指令")).append(Component.text(" "));
-    m = m.append(button("[取消]", NamedTextColor.RED, "/pev clear", "清掉預覽"));
+    if (c.applicable) m = m.append(button("[Apply]", NamedTextColor.GREEN, "/pev apply", "Run the command for real, as previewed")).append(Component.text(" "));
+    m = m.append(button("[Cancel]", NamedTextColor.RED, "/pev clear", "Clear the preview"));
     info(p, m);
   }
 
@@ -374,9 +391,8 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     var loc = p.getEyeLocation();
     Build.Result r = Build.build(writes, style, loc.getX(), loc.getY(), loc.getZ(), maxDisplay);
     st.fake.show(p.getWorld(), r.fake());
-    st.previewBox = r.box();
     st.source = src;
-    if (r.truncated()) p.sendActionBar(Component.text("預覽太大：只顯示離你最近的 " + String.format("%,d", maxDisplay) + " 格", NamedTextColor.GOLD));
+    if (r.truncated()) p.sendActionBar(Component.text("Preview too large: showing only the " + String.format("%,d", maxDisplay) + " blocks nearest to you", NamedTextColor.GOLD));
   }
 
   private void live(PlayerState st, long now) {
@@ -391,24 +407,24 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     }
     boolean pev = hasPev(t);
     if (!st.always && !pev) {
-      // 不是恆預覽，-pev 被刪掉了：收掉打字預覽
+      // Not in always-preview and -pev was deleted: clear the typing preview
       st.typed = null;
       st.typedDone = null;
       if (st.source == PlayerState.Source.LIVE) st.clearPreview();
       return;
     }
     if (t.equals(st.typedDone) || now - st.typedAt < 250) return;
-    if (st.source == PlayerState.Source.COMMAND && !pev) { // 不蓋掉還沒套用的試跑（明確打了 -pev 例外）
+    if (st.source == PlayerState.Source.COMMAND && !pev) { // don't replace an unapplied dry-run (unless -pev was typed)
       st.typedDone = t;
       return;
     }
     Live.Out out = Live.compute(st.player, t, fawe, liveMax);
     if (out == Live.NOT_LIVE && pev) {
-      typedRun(st, t, now); // 其他指令：停手後真的試跑一次
+      typedRun(st, t, now); // other commands: dry-run once typing pauses
       return;
     }
     st.typedDone = t;
-    if (out == null) return; // 打到一半解析不了：保留上一次
+    if (out == null) return; // half-typed and unparsable: keep the previous preview
     if (out == Live.NOT_LIVE) {
       if (st.source == PlayerState.Source.LIVE) st.clearPreview();
       return;
@@ -419,16 +435,16 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
     show(st, out.writes(), out.style(), PlayerState.Source.LIVE);
-    st.player.sendActionBar(Component.text("預覽" + (out.note() == null ? "" : "（" + out.note() + "）") + "："
-        + String.format("%,d", out.writes().size()) + " 格", NamedTextColor.AQUA));
+    st.player.sendActionBar(Component.text("Preview" + (out.note() == null ? "" : " (" + out.note() + ")") + ": "
+        + String.format("%,d", out.writes().size()) + " blocks", NamedTextColor.AQUA));
   }
 
   /**
-   * 打字中帶 -pev 的一般 WorldEdit 指令（//walls、//stack、//smooth…）：停手 600 ms 後在攔截模式下執行一次，
-   * 和按 Enter 加 -pev 一樣不會寫入世界，結果當成打字預覽。
+   * Any other WorldEdit command typed with -pev (//walls, //stack, //smooth…): once typing pauses for 600 ms, run it once in
+   * capture mode. Like pressing Enter with -pev, nothing is written; the result is shown as a typing preview.
    */
   private void typedRun(PlayerState st, String t, long now) {
-    if (now - st.typedAt < 600 || st.armed != null) return; // 還在打，或上一次試跑還沒結束
+    if (now - st.typedAt < 600 || st.armed != null) return; // still typing, or the previous dry-run hasn't finished
     st.typedDone = t;
     Player p = st.player;
     String[] parts = (t.startsWith("/") ? t.substring(1) : t).split(" ", -1);
@@ -439,21 +455,68 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
     List<String> kept = new ArrayList<>();
-    for (int i = 0; i < parts.length; i++) if (i == 0 || !parts[i].equalsIgnoreCase("-pev")) kept.add(parts[i]);
+    for (int i = 0; i < parts.length; i++) if (i == 0 || !isPev(parts[i])) kept.add(parts[i]);
     if (NEVER.contains(label)) {
-      p.sendActionBar(Component.text("這個指令不能預覽", NamedTextColor.RED));
+      p.sendActionBar(Component.text("This command cannot be previewed", NamedTextColor.RED));
       return;
     }
     if (TYPED_UNSAFE.contains(label) || (SELECTION_FLAG.contains(label) && hasFlag(kept, 's'))) {
-      p.sendActionBar(Component.text("這個指令會改剪貼簿或選區：按 Enter 才試跑", NamedTextColor.GOLD));
+      p.sendActionBar(Component.text("This command changes the clipboard or selection: press Enter to dry-run", NamedTextColor.GOLD));
       return;
     }
     String clean = "/" + String.join(" ", kept).strip();
     Capture c = new Capture(p.getUniqueId(), clean, style(st, label, kept, p), true, false, maxCapture);
     c.live = true;
     st.armed = c;
-    // performCommand 不經過 PlayerCommandPreprocessEvent；寫入都會被 st.armed 收走
+    // performCommand skips PlayerCommandPreprocessEvent; every write is captured by st.armed
     p.performCommand(clean.substring(1));
+  }
+
+  /** Selection flash: when the selection changes to a complete region, briefly show it as lime glass (like CreativeKit's magic wand). */
+  private void selection(PlayerState st) {
+    Player p = st.player;
+    LocalSession s = WorldEdit.getInstance().getSessionManager().getIfPresent(BukkitAdapter.adapt(p));
+    String key = null;
+    Region r = null;
+    if (s != null) {
+      var w = s.getSelectionWorld();
+      // only ask for the selector of the selection's own world: getRegionSelector(other world) clears the selection
+      if (w != null && w.getName().equals(p.getWorld().getName())) {
+        try {
+          var sel = s.getRegionSelector(w);
+          if (sel.isDefined()) {
+            r = sel.getRegion();
+            key = r.getClass().getName() + r.getMinimumPoint() + r.getMaximumPoint() + volume(r);
+          }
+        } catch (IncompleteRegionException ignored) {
+          // not complete yet
+        }
+      }
+    }
+    if (!st.selSeen) { // no flash for the selection a player already had on join
+      st.selSeen = true;
+      st.selKey = key;
+      return;
+    }
+    if (java.util.Objects.equals(key, st.selKey)) return;
+    st.selKey = key;
+    if (r == null || !st.selectFlash) return;
+    if (st.source != PlayerState.Source.NONE && st.source != PlayerState.Source.SELECTION) return; // don't hide a real preview
+    if (volume(r) > flashMax) return;
+    BlockData lime = Bukkit.createBlockData(org.bukkit.Material.LIME_STAINED_GLASS);
+    Map<Long, BlockData> m = new HashMap<>();
+    for (BlockVector3 v : r) m.put(Keys.key(v.x(), v.y(), v.z()), lime);
+    if (m.isEmpty()) return;
+    show(st, m, Capture.Style.GLASS, PlayerState.Source.SELECTION);
+    st.flashUntil = tick + flashTicks;
+  }
+
+  private static long volume(Region r) {
+    try {
+      return r.getVolume();
+    } catch (Throwable t) {
+      return Long.MAX_VALUE;
+    }
   }
 
   private void brush(PlayerState st) {
@@ -479,16 +542,16 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   @Override
   public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
     if (!(sender instanceof Player p)) {
-      // 主控台：pev debug <玩家>（測試用）
+      // console: pev debug <player> (for tests)
       if (args.length == 2 && args[0].equalsIgnoreCase("debug") && Bukkit.getPlayerExact(args[1]) != null) {
         PlayerState st = state(Bukkit.getPlayerExact(args[1]));
         sender.sendMessage("PEV_DEBUG source=" + st.source + " fake=" + st.fake.size()
             + " glass=" + st.fake.count(org.bukkit.Material.LIME_STAINED_GLASS) + " armed=" + (st.armed != null)
-            + " always=" + st.always + " last=" + st.lastCommand + " box=" + st.previewBox.segs().size()
-            + " outline=" + st.outline.count() + " typed=" + st.typed + " liveError=" + Live.lastError);
+            + " always=" + st.always + " last=" + st.lastCommand
+            + " entities=" + displayCount(st.player) + " cut=" + st.fake.carved() + " typed=" + st.typed + " liveError=" + Live.lastError);
         return true;
       }
-      sender.sendMessage("只有玩家可以用");
+      sender.sendMessage("Players only");
       return true;
     }
     PlayerState st = state(p);
@@ -501,42 +564,50 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
           if (st.source == PlayerState.Source.LIVE || st.source == PlayerState.Source.BRUSH) st.clearPreview();
         }
         save(st);
-        info(p, Component.text("恆預覽：" + (st.always ? "開（WorldEdit 指令只試跑，按 [套用] 才寫入；打字與筆刷即時預覽）" : "關"),
+        info(p, Component.text("Always-preview: " + (st.always
+                ? "on (WorldEdit commands only dry-run until you click [Apply]; typing and brushes preview live)" : "off"),
             st.always ? NamedTextColor.GREEN : NamedTextColor.GRAY));
       }
-      case "box" -> {
-        st.showBox = toggle(args, st.showBox);
+      case "select" -> {
+        st.selectFlash = toggle(args, st.selectFlash);
         save(st);
-        info(p, Component.text("預覽範圍框：" + (st.showBox ? "開" : "關"), NamedTextColor.GRAY));
+        if (!st.selectFlash && st.source == PlayerState.Source.SELECTION) st.clearPreview();
+        info(p, Component.text("Selection flash: " + onOff(st.selectFlash), NamedTextColor.GRAY));
+      }
+      case "carve" -> {
+        st.carve = toggle(args, st.carve);
+        st.fake.carving(st.carve);
+        save(st);
+        info(p, Component.text("Carve the preview around your view and body: " + onOff(st.carve), NamedTextColor.GRAY));
       }
       case "brush" -> {
         st.brush = toggle(args, st.brush);
         save(st);
-        info(p, Component.text("筆刷預覽（恆預覽中）：" + (st.brush ? "開" : "關"), NamedTextColor.GRAY));
+        info(p, Component.text("Brush preview (in always-preview): " + onOff(st.brush), NamedTextColor.GRAY));
       }
       case "style" -> {
         if (args.length < 2) {
-          info(p, Component.text("用法：/pev style auto|blocks|glass（目前 " + st.style.name().toLowerCase(Locale.ROOT) + "）", NamedTextColor.GRAY));
+          info(p, Component.text("Usage: /pev style auto|blocks|glass (current: " + st.style.name().toLowerCase(Locale.ROOT) + ")", NamedTextColor.GRAY));
           return true;
         }
         try {
           st.style = PlayerState.StyleMode.valueOf(args[1].toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-          info(p, Component.text("要 auto、blocks 或 glass", NamedTextColor.RED));
+          info(p, Component.text("Expected auto, blocks or glass", NamedTextColor.RED));
           return true;
         }
         save(st);
-        info(p, Component.text("試跑的顯示方式：" + args[1].toLowerCase(Locale.ROOT), NamedTextColor.GRAY));
+        info(p, Component.text("Dry-run display style: " + args[1].toLowerCase(Locale.ROOT), NamedTextColor.GRAY));
       }
       case "apply" -> {
         String c = st.lastCommand;
         if (c == null || st.source != PlayerState.Source.COMMAND) {
-          info(p, Component.text("沒有可以套用的試跑", NamedTextColor.RED));
+          info(p, Component.text("Nothing to apply", NamedTextColor.RED));
           return true;
         }
         st.lastCommand = null;
         st.clearPreview();
-        // performCommand 不經過 PlayerCommandPreprocessEvent，所以不會再被試跑
+        // performCommand skips PlayerCommandPreprocessEvent, so it won't be dry-run again
         p.performCommand(c.substring(1));
       }
       case "clear", "cancel" -> {
@@ -544,58 +615,69 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         st.lastCommand = null;
         st.typed = null;
         st.clearPreview();
-        info(p, Component.text("已清掉預覽", NamedTextColor.GRAY));
+        info(p, Component.text("Preview cleared", NamedTextColor.GRAY));
       }
       case "mask", "pattern" -> {
         if (args.length < 2) {
-          info(p, Component.text("用法：/pev " + sub + " <" + (sub.equals("mask") ? "遮罩" : "pattern") + ">", NamedTextColor.GRAY));
+          info(p, Component.text("Usage: /pev " + sub + " <" + sub + ">", NamedTextColor.GRAY));
           return true;
         }
         String text = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length));
         String buffer = sub.equals("mask") ? "//replace " + text : "//set " + text;
         Live.Out out = Live.compute(p, buffer, fawe, maxCapture);
         if (out == null) {
-          info(p, Component.text("無法解析：" + text, NamedTextColor.RED));
+          info(p, Component.text("Could not parse: " + text, NamedTextColor.RED));
           return true;
         }
         if (out.writes().isEmpty()) {
-          info(p, Component.text(out.note() != null ? out.note() : "選區裡沒有符合的方塊", NamedTextColor.GRAY));
+          info(p, Component.text(out.note() != null ? out.note() : "No matching blocks in the selection", NamedTextColor.GRAY));
           st.clearPreview();
           return true;
         }
         show(st, out.writes(), out.style(), PlayerState.Source.COMMAND);
         st.lastCommand = sub.equals("pattern") ? "//set " + text : null;
-        Component m = Component.text((sub.equals("mask") ? "遮罩 " : "pattern ") + text + "：" + String.format("%,d", out.writes().size()) + " 格  ", NamedTextColor.GRAY);
-        if (st.lastCommand != null) m = m.append(button("[套用 //set]", NamedTextColor.GREEN, "/pev apply", "執行 //set " + text)).append(Component.text(" "));
-        info(p, m.append(button("[取消]", NamedTextColor.RED, "/pev clear", "清掉預覽")));
+        Component m = Component.text(sub + " " + text + ": " + String.format("%,d", out.writes().size()) + " blocks  ", NamedTextColor.GRAY);
+        if (st.lastCommand != null) m = m.append(button("[Apply //set]", NamedTextColor.GREEN, "/pev apply", "Run //set " + text)).append(Component.text(" "));
+        info(p, m.append(button("[Cancel]", NamedTextColor.RED, "/pev clear", "Clear the preview")));
       }
       default -> help(p, st);
     }
     return true;
   }
 
+  /** Display entities near the player (for tests: the plugin must not spawn any). */
+  private static long displayCount(Player p) {
+    return p.getNearbyEntities(64, 64, 64).stream().filter(e -> e instanceof org.bukkit.entity.Display).count();
+  }
+
+  private static String onOff(boolean b) {
+    return b ? "on" : "off";
+  }
+
   private static boolean toggle(String[] args, boolean cur) {
     if (args.length < 2) return !cur;
     return switch (args[1].toLowerCase(Locale.ROOT)) {
-      case "on", "true", "開" -> true;
-      case "off", "false", "關" -> false;
+      case "on", "true" -> true;
+      case "off", "false" -> false;
       default -> !cur;
     };
   }
 
   private void help(Player p, PlayerState st) {
     String[][] lines = {
-        {"/pev always [on|off]", "恆預覽：WorldEdit 指令只試跑；打字中的 //set、//replace 與筆刷即時預覽（目前 " + (st.always ? "開" : "關") + "）"},
-        {"<WorldEdit 指令> -pev", "只試跑這一次"},
-        {"/pev apply", "照最後一次試跑真的執行"},
-        {"/pev clear", "清掉預覽"},
-        {"/pev mask <遮罩>", "選區中符合遮罩的方塊顯示綠色玻璃"},
-        {"/pev pattern <pattern>", "預覽選區換成 pattern"},
-        {"/pev style auto|blocks|glass", "試跑的顯示方式（auto：有遮罩或 replace 用綠色玻璃）"},
-        {"/pev box [on|off]", "預覽外圍的黃框與格數標籤（目前 " + (st.showBox ? "開" : "關") + "）"},
-        {"/pev brush [on|off]", "恆預覽中的筆刷預覽（目前 " + (st.brush ? "開" : "關") + "）"},
+        {"/pev always [on|off]", "Always-preview: WorldEdit commands only dry-run; //set, //replace and brushes preview live (now "
+            + onOff(st.always) + ")"},
+        {"<WorldEdit command> -pev", "Dry-run just this command (--pev works too; previews while typing)"},
+        {"/pev apply", "Run the last dry-run for real"},
+        {"/pev clear", "Clear the preview"},
+        {"/pev mask <mask>", "Show blocks in the selection matching the mask as lime glass"},
+        {"/pev pattern <pattern>", "Preview the selection filled with the pattern"},
+        {"/pev style auto|blocks|glass", "Dry-run display style (auto: lime glass for masks and replace)"},
+        {"/pev brush [on|off]", "Brush preview in always-preview (now " + onOff(st.brush) + ")"},
+        {"/pev select [on|off]", "Briefly flash new selections as lime glass (now " + onOff(st.selectFlash) + ")"},
+        {"/pev carve [on|off]", "Carve the preview around your line of sight and body (now " + onOff(st.carve) + ")"},
     };
-    info(p, Component.text("WorldEdit 預覽", NamedTextColor.AQUA));
+    info(p, Component.text("WorldEdit preview", NamedTextColor.AQUA));
     for (String[] l : lines)
       p.sendMessage(Component.text(" " + l[0], NamedTextColor.WHITE).append(Component.text("  " + l[1], NamedTextColor.GRAY))
           .clickEvent(ClickEvent.suggestCommand(l[0].replaceAll(" *[\\[<].*", "") + " ")));
@@ -605,13 +687,13 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
     if (args.length == 1) {
       List<String> out = new ArrayList<>();
-      for (String s : List.of("always", "apply", "clear", "mask", "pattern", "style", "box", "brush", "help"))
+      for (String s : List.of("always", "apply", "clear", "mask", "pattern", "style", "brush", "select", "carve", "help"))
         if (s.startsWith(args[0].toLowerCase(Locale.ROOT))) out.add(s);
       return out;
     }
     if (args.length == 2) {
       return switch (args[0].toLowerCase(Locale.ROOT)) {
-        case "always", "box", "brush" -> List.of("on", "off");
+        case "always", "brush", "select", "carve" -> List.of("on", "off");
         case "style" -> List.of("auto", "blocks", "glass");
         default -> List.of();
       };
@@ -624,6 +706,6 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   }
 
   private static void info(Player p, Component c) {
-    p.sendMessage(Component.text("[預覽] ", NamedTextColor.AQUA).append(c));
+    p.sendMessage(Component.text("[Preview] ", NamedTextColor.AQUA).append(c));
   }
 }

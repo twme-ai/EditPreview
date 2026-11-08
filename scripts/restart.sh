@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 部署 build/libs 的 jar，重開測試伺服器與客戶端
+# Deploy the jar from build/libs and restart the test server and client
 . "$(dirname "$0")/env.sh"
 cp "$P"/build/libs/EditPreview-*.jar "$SRV/plugins/EditPreview.jar" || exit 1
 pkill -f '^pevclient'

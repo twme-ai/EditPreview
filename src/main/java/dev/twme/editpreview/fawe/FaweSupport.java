@@ -20,11 +20,11 @@ import java.util.logging.Logger;
 import org.bukkit.block.data.BlockData;
 
 /**
- * FAWE 專用（只在 FAWE 存在時載入）。
+ * FAWE only (loaded only when FAWE is present).
  * <p>
- * FAWE 的寫入大多是整批交給佇列，不經過 extent 的 setBlock；所以在佇列上掛一個 CUSTOM 等級的批次處理器。
- * 處理器依等級排序：遮罩（REMOVING_BLOCKS）之後、歷史紀錄（READING_BLOCKS）之前，
- * 這裡看到的就是遮罩後的最終結果；記下來之後把這批寫入整個清空，世界和 //undo 都不受影響。
+ * Most FAWE writes go to the queue in bulk, bypassing the extent's setBlock, so a CUSTOM-scope batch processor is added to the queue.
+ * Processors are ordered by scope: after masks (REMOVING_BLOCKS) and before history (READING_BLOCKS),
+ * so this sees the final, masked result; after recording it the whole batch is cleared, leaving the world and //undo untouched.
  */
 public final class FaweSupport implements IBatchProcessor {
   private final Capture cap;
@@ -33,7 +33,7 @@ public final class FaweSupport implements IBatchProcessor {
     this.cap = cap;
   }
 
-  /** 在 extent 鏈裡找到佇列並掛上處理器；找不到回傳 false（改用 CaptureExtent）。 */
+  /** Finds the queue in the extent chain and adds the processor; returns false if none is found (use CaptureExtent instead). */
   public static boolean attach(Extent extent, Capture cap) {
     FaweSupport p = new FaweSupport(cap);
     for (int depth = 0; extent != null && depth < 32; depth++) {
@@ -45,7 +45,7 @@ public final class FaweSupport implements IBatchProcessor {
     return false;
   }
 
-  /** addProcessor 定義在 FAWE 版的 Extent 上（編譯時解析到的是原版 Extent），所以用反射呼叫。 */
+  /** addProcessor is defined on FAWE's Extent (we compile against vanilla Extent), so it is called reflectively. */
   private static boolean add(Object queue, IBatchProcessor p) {
     try {
       queue.getClass().getMethod("addProcessor", IBatchProcessor.class).invoke(queue, p);
@@ -55,7 +55,7 @@ public final class FaweSupport implements IBatchProcessor {
     }
   }
 
-  /** FAWE 只接受 allowed-plugins 裡的 extent 類別（以套件名稱子字串比對）。 */
+  /** FAWE only accepts extent classes listed in allowed-plugins (matched by package-name substring). */
   public static void allowExtent(Class<?> type, Logger log) {
     String name = type.getPackageName().toLowerCase(Locale.ROOT);
     var settings = Settings.settings().EXTENT;
@@ -67,10 +67,10 @@ public final class FaweSupport implements IBatchProcessor {
       copy.add(type.getPackageName());
       settings.ALLOWED_PLUGINS = copy;
     }
-    log.info("已將 " + type.getPackageName() + " 加入 FAWE 的 allowed-plugins（只在記憶體中）");
+    log.info("Added " + type.getPackageName() + " to FAWE allowed-plugins (in memory only)");
   }
 
-  /** FAWE 的遮罩綁著當初解析時的 extent（多半是已關閉的 EditSession），換成現在要讀的。 */
+  /** FAWE masks stay bound to the extent they were parsed with (often a closed EditSession); rebind to the one we read now. */
   public static void resetMask(com.sk89q.worldedit.function.mask.Mask m, Extent e) {
     if (m != null) new com.fastasyncworldedit.core.util.MaskTraverser(m).reset(e);
   }
@@ -88,12 +88,12 @@ public final class FaweSupport implements IBatchProcessor {
       int by = layer << 4;
       for (int i = 0; i < blocks.length; i++) {
         char c = blocks[i];
-        if (c == 0) continue; // 0＝這格沒寫
+        if (c == 0) continue; // 0 = not written
         cap.put(bx + (i & 15), by + (i >> 8), bz + ((i >> 4) & 15), c);
       }
     }
     cap.touch();
-    // 什麼都不寫：方塊、方塊實體、生物群系、實體、光照全部清掉
+    // write nothing: clear blocks, block entities, biomes, entities and light
     set.reset();
     return set;
   }

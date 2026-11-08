@@ -9,14 +9,14 @@ import java.util.function.Function;
 import java.util.UUID;
 
 /**
- * 玩家「上膛」時攔下他的 EditSession：
+ * Intercepts a player's EditSession while a capture is armed:
  * <ul>
- *   <li>原版 WorldEdit：BEFORE_HISTORY 階段包一層 {@link CaptureExtent}（在遮罩之後、歷史之前）。
- *   <li>FAWE：最靠近世界的 BEFORE_CHANGE 階段，在佇列掛 {@link FaweSupport} 批次處理器；找不到佇列才包 extent。
+ *   <li>Vanilla WorldEdit: wrap a {@link CaptureExtent} at BEFORE_HISTORY (after masks, before history).
+ *   <li>FAWE: at BEFORE_CHANGE (closest to the world), add a {@link FaweSupport} batch processor to the queue; wrap the extent only if no queue is found.
  * </ul>
  */
 final class WeHook {
-  /** 這條執行緒接下來建立的 EditSession 一律攔下（筆刷預覽：只攔自己建的那一個，不影響玩家真正的編輯） */
+  /** EditSessions created next on this thread are always captured (brush preview: only our own session, never the player's real edits) */
   static final ThreadLocal<Capture> FORCED = new ThreadLocal<>();
 
   private final boolean fawe;
@@ -51,7 +51,7 @@ final class WeHook {
       try {
         if (FaweSupport.attach(e.getExtent(), cap)) return;
       } catch (LinkageError err) {
-        // FAWE 內部類別對不上：退回 extent
+        // FAWE internals don't match: fall back to the extent
       }
     }
     e.setExtent(new CaptureExtent(e.getExtent(), cap));

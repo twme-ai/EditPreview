@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "dev.twme"
-version = "0.2.0"
+version = "0.3.0"
 
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(21))
@@ -14,7 +14,7 @@ dependencies {
     compileOnly("com.sk89q.worldedit:worldedit-core:7.4.2") { isTransitive = false }
     compileOnly("com.sk89q.worldedit:worldedit-bukkit:7.4.2") { isTransitive = false }
     compileOnly("com.sk89q.worldedit.worldedit-libs:core:7.4.2") { isTransitive = false }
-    // FAWE 專用類別放在 fawe 套件，只在 FAWE 存在時載入
+    // FAWE-only classes live in the fawe package and are loaded only when FAWE is present
     compileOnly("com.fastasyncworldedit:FastAsyncWorldEdit-Core:2.15.2") { isTransitive = false }
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")

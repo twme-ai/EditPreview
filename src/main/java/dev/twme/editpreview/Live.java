@@ -21,12 +21,12 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
 
 /**
- * 打字預覽：恆預覽開著時，聊天欄裡打到一半的 //set、//replace 直接用 WorldEdit 的解析器解析，
- * 在選區裡算出結果（不執行指令，所以打錯也不會出現錯誤訊息）。
+ * Typing preview: a half-typed //set or //replace in the chat box is parsed directly with WorldEdit's parsers and evaluated
+ * over the selection (the command is not executed, so typos produce no error messages).
  * <ul>
- *   <li>//set &lt;pattern&gt;：選區（扣掉 gmask 不符合的）換成 pattern 的樣子。
- *   <li>//replace &lt;遮罩&gt;：還在打遮罩時，符合的格子顯示綠色玻璃。
- *   <li>//replace &lt;遮罩&gt; &lt;pattern&gt;：開始打 pattern 後，符合的格子顯示換完的樣子。
+ *   <li>//set &lt;pattern&gt;: the selection (minus blocks failing the gmask) filled with the pattern.
+ *   <li>//replace &lt;mask&gt;: while the mask is being typed, matching blocks show as lime glass.
+ *   <li>//replace &lt;mask&gt; &lt;pattern&gt;: once the pattern is typed, matching blocks show the replaced result.
  * </ul>
  */
 final class Live {
@@ -35,10 +35,10 @@ final class Live {
   static final Set<String> SET = Set.of("/set");
   static final Set<String> REPLACE = Set.of("/replace", "/rep", "/re");
 
-  /** 解析失敗回傳 null（保留上一次的預覽）；不是這兩個指令回傳 {@link #NOT_LIVE}。 */
+  /** compute returns null when parsing fails (keep the previous preview), or {@link #NOT_LIVE} for other commands. */
   record Out(Map<Long, BlockData> writes, Capture.Style style, String note) {}
 
-  /** 最後一次解析／計算失敗的原因（/pev debug 用） */
+  /** Reason for the last parse/compute failure (for pev debug). */
   static volatile String lastError;
 
   static final Out NOT_LIVE = new Out(Map.of(), Capture.Style.BLOCKS, null);
@@ -58,8 +58,8 @@ final class Live {
     List<String> args = new ArrayList<>();
     for (int i = 1; i < parts.length; i++) {
       String a = parts[i];
-      if (a.isEmpty() || a.equalsIgnoreCase("-pev")) continue;
-      if (a.length() == 2 && a.charAt(0) == '-' && Character.isLetter(a.charAt(1))) continue; // 旗標
+      if (a.isEmpty() || EditPreviewPlugin.isPev(a)) continue;
+      if (a.length() == 2 && a.charAt(0) == '-' && Character.isLetter(a.charAt(1))) continue; // flag
       args.add(a);
     }
     if (args.isEmpty()) return NOT_LIVE;
@@ -75,12 +75,12 @@ final class Live {
     LocalSession session = WorldEdit.getInstance().getSessionManager().getIfPresent(actor);
     if (session == null) return NOT_LIVE;
     World world = session.getSelectionWorld();
-    if (world == null || !world.getName().equals(p.getWorld().getName())) return new Out(Map.of(), Capture.Style.BLOCKS, "沒有選區");
+    if (world == null || !world.getName().equals(p.getWorld().getName())) return new Out(Map.of(), Capture.Style.BLOCKS, "No selection");
     Region region;
     try {
       region = session.getRegionSelector(world).getRegion();
     } catch (IncompleteRegionException e) {
-      return new Out(Map.of(), Capture.Style.BLOCKS, "沒有選區");
+      return new Out(Map.of(), Capture.Style.BLOCKS, "No selection");
     }
     long volume;
     try {
@@ -88,7 +88,7 @@ final class Live {
     } catch (Throwable t) {
       volume = Long.MAX_VALUE;
     }
-    if (volume > maxVolume) return new Out(Map.of(), Capture.Style.BLOCKS, "選區超過 " + String.format("%,d", maxVolume) + " 格，打字預覽暫停（按 Enter 仍會試跑）");
+    if (volume > maxVolume) return new Out(Map.of(), Capture.Style.BLOCKS, "Selection is larger than " + String.format("%,d", maxVolume) + " blocks; typing preview paused (Enter still dry-runs)");
 
     ParserContext ctx = new ParserContext();
     ctx.setActor(actor);
@@ -112,7 +112,7 @@ final class Live {
         dev.twme.editpreview.fawe.FaweSupport.resetMask(gmask, world);
         dev.twme.editpreview.fawe.FaweSupport.resetMask(mask, world);
       } catch (Throwable ignored) {
-        // 舊版 FAWE
+        // older FAWE
       }
     }
     BlockData glass = Bukkit.createBlockData("minecraft:lime_stained_glass");
@@ -134,6 +134,6 @@ final class Live {
       return null;
     }
     return new Out(out, pattern == null ? Capture.Style.GLASS : Capture.Style.BLOCKS,
-        label.toLowerCase(Locale.ROOT).equals("/set") ? null : (pattern == null ? "符合遮罩" : "取代後"));
+        label.toLowerCase(Locale.ROOT).equals("/set") ? null : (pattern == null ? "matching mask" : "after replace"));
   }
 }

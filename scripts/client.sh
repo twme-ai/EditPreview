@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 在 Xvfb :98 開客戶端，直接連進測試伺服器
+# Start the client on Xvfb :98 and connect straight to the test server
 . "$(dirname "$0")/env.sh"
 pgrep -f "Xvfb :98" >/dev/null || { setsid nohup Xvfb :98 -screen 0 1280x720x24 >/dev/null 2>&1 < /dev/null & sleep 2; }
 cd "$CLI"

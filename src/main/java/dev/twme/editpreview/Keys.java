@@ -1,6 +1,6 @@
 package dev.twme.editpreview;
 
-/** 方塊位置壓成一個 long：x、z 各 26 位元，y 12 位元（-2048..2047）。 */
+/** Packs a block position into a long: 26 bits each for x and z, 12 bits for y (-2048..2047). */
 public final class Keys {
   private Keys() {}
 
