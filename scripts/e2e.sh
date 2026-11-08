@@ -125,7 +125,8 @@ if grep -aq 'Preview enabled (FastAsyncWorldEdit)' "$LOG"; then
   esc
 fi
 
-# 9. Brush: aiming previews (nothing written), a real stroke writes as usual
+# 9. Brush: aiming previews (nothing written), a real stroke writes as usual; on by default, without always-preview too
+chat "/pev always off"
 chat "//sel"
 cmd "item replace entity $NAME weapon.mainhand with minecraft:blaze_rod"
 sync
@@ -138,8 +139,10 @@ xdotool click 3
 ok brush_real 'waitfor "isblock 0 -61 -5 gold_block" 6'
 chat "//undo"
 ok brush_undo 'waitfor "isblock 0 -61 -5 grass_block" 6'
-chat "/pev always off"
+ok brush_no_always '[ "$(dbg always)" = false ] && waitfor "[ \"\$(dbg source)\" = BRUSH ]" 3'
+chat "/pev brush off"
 ok brush_off 'waitfor "[ \"\$(dbg source)\" = NONE ]" 3'
+chat "/pev brush on"
 cmd "item replace entity $NAME weapon.mainhand with minecraft:air"
 
 # 10. Without always-preview, typing -pev already previews

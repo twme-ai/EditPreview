@@ -37,7 +37,8 @@ Previews are sent only to the player who made them (fake blocks), never touch th
   - The two typing stages can be turned on and off separately: `/pev live mask` (the `//replace` mask as lime glass) and
     `/pev live pattern` (the `//set` / `//replace` pattern as real blocks). With only the mask stage on, typing
     `//replace stone diamond_block` keeps showing which blocks will be replaced. Typing `-pev` always shows both.
-  - **Brush**: holding a brush and aiming shows the result of that stroke; clicking writes as usual.
+- **Brush preview** (`/pev brush`, on by default, independent of always-preview): holding a brush and aiming shows the
+  result of that stroke; clicking writes as usual.
 - **Selection flash** (`/pev select`, on by default, independent of always-preview): whenever a selection is completed
   or changed, its exposed blocks flash as lime glass for 3 seconds — any selector shape, including FAWE magic select.
 - **Carving** (`/pev carve`, on by default): fake blocks along your line of sight and around your body are hidden, so a
@@ -60,8 +61,8 @@ Permission `editpreview.use` (everyone by default). Each player's settings are s
 
 | Command | Description |
 |---|---|
-| `/pev always [on\|off]` | Always-preview (live typing and brush previews; Enter still executes) |
-| `/pev brush [on\|off]` | Brush preview |
+| `/pev always [on\|off]` | Always-preview (live typing previews; Enter still executes) |
+| `/pev brush [on\|off]` | Brush aim preview (on by default) |
 | `/pev live <mask\|pattern> [on\|off]` | Typing preview stages: `//replace` mask as lime glass / pattern as real blocks |
 | `/pev select [on\|off]` | Lime-glass flash of new selections |
 | `/pev carve [on\|off]` | Carve the preview around your line of sight and body |
@@ -133,7 +134,7 @@ defaults:                # per-player defaults
 ```sh
 ./gradlew build           # build/libs/EditPreview-<version>.jar (also runs the unit tests)
 scripts/restart.sh        # deploy to the test server and restart server + client
-scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 69 checks; WorldEdit 7.4.6: 66, FAWE-only checks skipped)
+scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 70 checks; WorldEdit 7.4.6: 67, FAWE-only checks skipped)
 scripts/persist.sh        # settings survive a server crash (kill -9)
 ```
 

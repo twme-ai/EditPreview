@@ -49,7 +49,8 @@ import org.bukkit.plugin.java.JavaPlugin;
  *   <li>A newly made selection (any shape) briefly flashes as lime glass (/pev select).
  *   <li>Fake blocks are carved around the player's line of sight and body, so the preview never blocks clicking (/pev carve).
  *   <li>Typing -pev in chat (before pressing Enter) already previews; in always-preview (/pev always), //set and //replace
- *       preview while typing (Enter still executes) and holding a brush previews the stroke at the aimed block.
+ *       preview while typing (Enter still executes).
+ *   <li>Holding a brush previews the stroke at the aimed block (/pev brush, on by default).
  * </ul>
  */
 public final class EditPreviewPlugin extends JavaPlugin implements Listener, TabExecutor {
@@ -356,8 +357,9 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       try {
         checkCapture(st, now);
         if (st.always || st.typed != null) live(st, now);
-        if (st.always && st.brush && tick % 3 == 0) brush(st);
-        else if ((!st.always || !st.brush) && st.source == PlayerState.Source.BRUSH) st.clearPreview();
+        // brush preview: independent of always-preview, on by default (/pev brush)
+        if (st.brush && tick % 3 == 0) brush(st);
+        else if (!st.brush && st.source == PlayerState.Source.BRUSH) st.clearPreview();
         if (tick % 4 == 0) selection(st);
         if (st.source == PlayerState.Source.SELECTION && tick >= st.flashUntil) st.clearPreview();
         if (st.source == PlayerState.Source.COMMAND && st.commandUntil > 0 && tick >= st.commandUntil) {
@@ -634,11 +636,11 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         st.always = toggle(args, st.always);
         if (!st.always) {
           st.typed = null;
-          if (st.source == PlayerState.Source.LIVE || st.source == PlayerState.Source.BRUSH) st.clearPreview();
+          if (st.source == PlayerState.Source.LIVE) st.clearPreview();
         }
         save(st);
         info(p, Component.text("Always-preview: " + (st.always
-                ? "on (typing //set, //replace and aiming brushes preview live; Enter still executes)" : "off"),
+                ? "on (typing //set and //replace previews live; Enter still executes)" : "off"),
             st.always ? NamedTextColor.GREEN : NamedTextColor.GRAY));
       }
       case "live" -> {
@@ -673,7 +675,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       case "brush" -> {
         st.brush = toggle(args, st.brush);
         save(st);
-        info(p, Component.text("Brush preview (in always-preview): " + onOff(st.brush), NamedTextColor.GRAY));
+        info(p, Component.text("Brush preview: " + onOff(st.brush), NamedTextColor.GRAY));
       }
       case "style" -> {
         if (args.length < 2) {
@@ -765,7 +767,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
 
   private void help(Player p, PlayerState st) {
     String[][] lines = {
-        {"/pev always [on|off]", "Always-preview: //set, //replace and brushes preview live while typing / aiming; Enter still executes (now "
+        {"/pev always [on|off]", "Always-preview: //set and //replace preview live while typing; Enter still executes (now "
             + onOff(st.always) + ")"},
         {"<WorldEdit command> -pev [seconds]", "Dry-run just this command (--pev works too; previews while typing; the preview stays "
             + fmtSeconds(dryRunTicks / 20.0) + " s unless you give seconds, 0 = until cleared)"},
@@ -774,7 +776,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         {"/pev mask <mask>", "Show blocks in the selection matching the mask as lime glass"},
         {"/pev pattern <pattern>", "Preview the selection filled with the pattern"},
         {"/pev style auto|blocks|glass", "Dry-run display style (auto: lime glass for masks and replace)"},
-        {"/pev brush [on|off]", "Brush preview in always-preview (now " + onOff(st.brush) + ")"},
+        {"/pev brush [on|off]", "Preview the stroke while aiming a brush, with or without always-preview (now " + onOff(st.brush) + ")"},
         {"/pev live <mask|pattern> [on|off]", "Typing preview stages in always-preview: //replace mask as lime glass (now "
             + onOff(st.liveMask) + "), //set / //replace pattern as real blocks (now " + onOff(st.livePattern) + ")"},
         {"/pev select [on|off]", "Briefly flash new selections as lime glass (now " + onOff(st.selectFlash) + ")"},
