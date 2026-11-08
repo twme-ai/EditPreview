@@ -28,6 +28,8 @@ final class PlayerState {
 
   boolean always;
   boolean brush = true;
+  /** Always-preview typing stages: //replace mask as lime glass / pattern result as real blocks */
+  boolean liveMask = true, livePattern = true;
   /** Flash new selections as lime glass (independent of always-preview) */
   boolean selectFlash = true;
   /** Carve the preview around the player's line of sight and body */

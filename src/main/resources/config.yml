@@ -18,5 +18,7 @@ selection-flash:
 defaults:
   always: false
   brush: true
+  live-mask: true       # always-preview typing: //replace mask as lime glass
+  live-pattern: true    # always-preview typing: //set / //replace pattern as real blocks
   selection-flash: true # independent of always-preview
   carve: true           # carve the preview around the player's line of sight and body

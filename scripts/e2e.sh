@@ -101,6 +101,30 @@ chat "//set glowstone -pev"
 ok always_pev_dryrun 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && isblock 0 -60 0 stone && isblock 0 -58 0 air'
 chat "/pev clear"
 
+# 8b. The two typing stages can be turned off separately (/pev live mask|pattern)
+chat "/pev live pattern off"
+typeonly "//replace stone diamond_block"
+ok live_pattern_off_mask 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg glass)\" = 49 ]" 5'
+esc
+typeonly "//set glowstone"
+ok live_pattern_off_set 'sleep 1.5; [ "$(dbg source)" = NONE ]'
+esc
+chat "/pev live pattern on"
+chat "/pev live mask off"
+typeonly "//replace stone"
+ok live_mask_off 'sleep 1.5; [ "$(dbg source)" = NONE ]'
+typemore " diamond_block"
+ok live_mask_off_pattern 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg glass)\" = 0 ] && [ \"\$(dbg fake)\" = 49 ]" 5'
+esc
+chat "/pev live mask on"
+# 8c. Patterns registered by other plugins through WorldEdit's pattern factory (here: FAWE's #linear)
+if grep -aq 'Preview enabled (FastAsyncWorldEdit)' "$LOG"; then
+  typeonly "//set #linear[gold_block,diamond_block]"
+  ok live_custom_pattern 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg fake)\" -gt 49 ]" 5 && [ "$(dbg glass)" = 0 ]'
+  shot 10-custom-pattern
+  esc
+fi
+
 # 9. Brush: aiming previews (nothing written), a real stroke writes as usual
 chat "//sel"
 cmd "item replace entity $NAME weapon.mainhand with minecraft:blaze_rod"

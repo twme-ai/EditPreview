@@ -27,6 +27,9 @@ Previews are sent only to the player who made them (fake blocks), never touch th
   for real; add `-pev` / `--pev` when you want a dry-run.
   - **Live typing preview**: typing `//set <pattern>` shows the pattern result live; typing `//replace <mask>` marks the
     blocks that would be replaced in lime glass, and once you type `<pattern>` it becomes a real block preview.
+  - The two typing stages can be turned on and off separately: `/pev live mask` (the `//replace` mask as lime glass) and
+    `/pev live pattern` (the `//set` / `//replace` pattern as real blocks). With only the mask stage on, typing
+    `//replace stone diamond_block` keeps showing which blocks will be replaced. Typing `-pev` always shows both.
   - **Brush**: holding a brush and aiming shows the result of that stroke; clicking writes as usual.
 - **Selection flash** (`/pev select`, on by default, independent of always-preview): whenever a selection is completed
   or changed, its exposed blocks flash as lime glass for 3 seconds — any selector shape, including FAWE magic select.
@@ -35,18 +38,24 @@ Previews are sent only to the player who made them (fake blocks), never touch th
 - **Masks**: `//gmask`, `-m` masks and brush masks are always respected. `replace`-like commands and masked edits show
   "affected blocks" as translucent lime glass by default; everything else shows the resulting blocks
   (change it with `/pev style`).
+- **Custom masks and patterns**: typing previews parse with WorldEdit's own mask / pattern factories, so masks and
+  patterns that other plugins register there (and FAWE's own, e.g. `#linear[...]`) are previewed too. Dry-runs capture
+  the command's real writes, so they work with anything the command accepts.
 - **Any selection works**: the preview is the command's real writes, independent of the selection shape; FAWE magic
   select (`//sel fuzzy`), polyhedral, etc. all work.
 - FAWE operations that need `//confirm`: after confirming they are previewed the same way.
 
 ## Commands
 
-Permission `editpreview.use` (everyone by default). Settings are stored in the player's data (PDC) and survive rejoins.
+Permission `editpreview.use` (everyone by default). Each player's settings are saved immediately to
+`plugins/EditPreview/players/<uuid>.yml`, so they survive rejoins, restarts and even crashes
+(settings from older versions are migrated automatically).
 
 | Command | Description |
 |---|---|
 | `/pev always [on\|off]` | Always-preview (live typing and brush previews; Enter still executes) |
 | `/pev brush [on\|off]` | Brush preview |
+| `/pev live <mask\|pattern> [on\|off]` | Typing preview stages: `//replace` mask as lime glass / pattern as real blocks |
 | `/pev select [on\|off]` | Lime-glass flash of new selections |
 | `/pev carve [on\|off]` | Carve the preview around your line of sight and body |
 | `/pev style <auto\|blocks\|glass>` | Preview style: automatic / always real blocks / always lime glass |
@@ -75,6 +84,8 @@ selection-flash:
 defaults:                # per-player defaults
   always: false
   brush: true
+  live-mask: true
+  live-pattern: true
   selection-flash: true
   carve: true
 ```
@@ -115,7 +126,8 @@ defaults:                # per-player defaults
 ```sh
 ./gradlew build           # build/libs/EditPreview-<version>.jar
 scripts/restart.sh        # deploy to the test server and restart server + client
-scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 45 checks; WorldEdit 7.4.6: 43, FAWE-only checks skipped)
+scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 50 checks; WorldEdit 7.4.6: 47, FAWE-only checks skipped)
+scripts/persist.sh        # settings survive a server crash (kill -9)
 ```
 
 The test scripts need a local Paper test server, a Minecraft client, Xvfb and xdotool; paths are in `scripts/env.sh`.
