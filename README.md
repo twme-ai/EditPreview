@@ -1,18 +1,18 @@
 # EditPreview
 
-為 WorldEdit / FastAsyncWorldEdit 加上「先看再寫」的預覽：選區邊框、指令試跑、打字即時預覽、筆刷瞄準預覽。
+為 WorldEdit / FastAsyncWorldEdit 加上「先看再寫」的方塊預覽：指令試跑、打字即時預覽、筆刷瞄準預覽。
+選區邊框請搭配其他插件（WorldEditCUI、WorldEditDisplay 等），本插件不畫選區。
 預覽只送給該玩家（顯示實體＋假方塊），不會改到世界，也不會留下 `//undo` 歷史。
 
 - Paper 1.21.x（使用 `AsyncTabCompleteEvent`、`sendMultiBlockChange`），Java 21
 - WorldEdit 7.4+ 或 FastAsyncWorldEdit 2.x（擇一）
 
-| 試跑 `//set` | `//replace` 遮罩（綠玻璃） | 筆刷 |
-|---|---|---|
-| ![](docs/pev-set.png) | ![](docs/replace-glass.png) | ![](docs/brush.png) |
+| 試跑 `//set` | `//replace` 遮罩（綠玻璃） | 筆刷 | 魔法選取（FAWE） |
+|---|---|---|---|
+| ![](docs/pev-set.png) | ![](docs/replace-glass.png) | ![](docs/brush.png) | ![](docs/fuzzy.png) |
 
 ## 功能
 
-- **選區邊框**：cuboid（pos1 橘、pos2 藍）、poly2d、cylinder、ellipsoid、convex，其他選區用灰色外框；附尺寸標籤。
 - **`-pev` 試跑**：任何會改方塊的 WorldEdit 指令後面加 `-pev`（例如 `//set stone -pev`、`//replace dirt grass_block -pev`），
   指令照常執行但寫入全被攔下，改成預覽，並給出 **[套用]**／**[取消]** 按鈕。黃色框標出受影響範圍。
 - **恆預覽**（`/pev always on`）：不用加 `-pev`，WorldEdit 編輯指令一律先試跑，按 [套用] 才真的寫入。
@@ -21,6 +21,8 @@
   - **筆刷**：拿著筆刷瞄準時顯示這一刷的結果；真的點下去照常寫入。
 - **遮罩**：一律尊重 `//gmask`、`-m` 遮罩與筆刷遮罩。`replace` 類指令、有遮罩時預設用綠色透明玻璃顯示「會被影響的方塊」，
   其餘顯示寫入後的真實方塊（可用 `/pev style` 改）。
+- **任何選區都適用**：預覽是攔下指令實際的寫入，與選區形狀無關；FAWE 的魔法選取（`//sel fuzzy`）、polyhedral 等也一樣。
+- 預覽外圍有黃色範圍框與「預覽：N 格」標籤，方便找到預覽（`/pev box off` 可關）。
 - FAWE 需要 `//confirm` 的大型操作：確認後一樣進入預覽。
 
 ## 指令
@@ -30,7 +32,7 @@
 | 指令 | 說明 |
 |---|---|
 | `/pev always [on\|off]` | 恆預覽開關 |
-| `/pev outline [on\|off]` | 選區邊框開關 |
+| `/pev box [on\|off]` | 預覽外圍的黃框與格數標籤 |
 | `/pev brush [on\|off]` | 筆刷預覽開關 |
 | `/pev style <auto\|blocks\|glass>` | 預覽樣式：自動／一律真實方塊／一律綠玻璃 |
 | `/pev apply` | 套用目前的試跑（重新執行原指令） |
@@ -48,7 +50,7 @@ max-capture: 1000000     # 一次試跑最多收幾格（超過的仍不寫入�
 max-display: 150000      # 最多送幾格假方塊（超過時留離玩家最近的）
 live-max-volume: 262144  # 打字預覽：選區超過這個體積就暫停（按 Enter 仍會試跑）
 brush-max-size: 32       # 筆刷大小超過這個就不預覽
-defaults: { always: false, outline: true, brush: true }
+defaults: { always: false, box: true, brush: true }
 ```
 
 ## 運作方式
@@ -62,7 +64,7 @@ defaults: { always: false, outline: true, brush: true }
 - **打字預覽**：客戶端每打一個字都會要補全，從 `AsyncTabCompleteEvent` 讀到目前的聊天內容，停手 250 ms 後用 WorldEdit 的
   遮罩／pattern 解析器在選區上計算。
 - **筆刷預覽**：照 `BrushTool` 的流程（瞄準、大小、材質、遮罩）自己建一個 EditSession 呼叫 `brush.build`，寫入全被攔下。
-- **顯示**：邊框與標籤是只對該玩家可見的 `BlockDisplay`／`TextDisplay`；方塊預覽是 `sendMultiBlockChange` 假方塊，
+- **顯示**：範圍框與標籤是只對該玩家可見的 `BlockDisplay`／`TextDisplay`；方塊預覽是 `sendMultiBlockChange` 假方塊，
   被完全包住的格子不送，以減少數量。
 
 ## 限制
@@ -77,7 +79,7 @@ defaults: { always: false, outline: true, brush: true }
 ```sh
 ./gradlew build           # build/libs/EditPreview-<版本>.jar
 scripts/restart.sh        # 部署到測試伺服器並重開伺服器＋客戶端
-scripts/e2e.sh            # 端對端測試（22 項；FAWE 2.16.1 與 WorldEdit 7.4.6 皆通過）
+scripts/e2e.sh            # 端對端測試（FAWE 2.16.1：26 項，含魔法選取；原版 WorldEdit 會跳過 FAWE 專屬項目）
 ```
 
 測試腳本需要本機的 Paper 測試伺服器、Minecraft 客戶端、Xvfb 與 xdotool，路徑在 `scripts/env.sh`。
