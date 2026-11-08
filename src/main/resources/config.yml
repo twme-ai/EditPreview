@@ -9,5 +9,5 @@ brush-max-size: 32
 # 新玩家的預設
 defaults:
   always: false
-  outline: true
+  box: true   # 預覽外圍的黃框與格數標籤
   brush: true

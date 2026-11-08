@@ -29,7 +29,7 @@ final class PlayerState {
   final FakeView fake;
 
   boolean always;
-  boolean showOutline = true;
+  boolean showBox = true;
   boolean brush = true;
   StyleMode style = StyleMode.AUTO;
 

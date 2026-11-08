@@ -1,14 +1,11 @@
 package dev.twme.editpreview;
 
 import com.destroystokyo.paper.event.server.AsyncTabCompleteEvent;
-import com.sk89q.worldedit.IncompleteRegionException;
 import com.sk89q.worldedit.LocalSession;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
-import com.sk89q.worldedit.regions.RegionSelector;
 import com.sk89q.worldedit.world.block.BlockState;
 import dev.twme.editpreview.render.Geo.Shape;
-import dev.twme.editpreview.render.Shapes;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -67,7 +64,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   private int maxCapture, maxDisplay, liveMax;
   private double brushMax;
   private long tick;
-  private NamespacedKey kAlways, kOutline, kBrush, kStyle;
+  private NamespacedKey kAlways, kBox, kBrush, kStyle;
 
   @Override
   public void onEnable() {
@@ -77,7 +74,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     liveMax = getConfig().getInt("live-max-volume", 262_144);
     brushMax = getConfig().getDouble("brush-max-size", 32);
     kAlways = new NamespacedKey(this, "always");
-    kOutline = new NamespacedKey(this, "outline");
+    kBox = new NamespacedKey(this, "box");
     kBrush = new NamespacedKey(this, "brush");
     kStyle = new NamespacedKey(this, "style");
     fawe = Bukkit.getPluginManager().getPlugin("FastAsyncWorldEdit") != null;
@@ -121,7 +118,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     PlayerState st = new PlayerState(this, p);
     var pdc = p.getPersistentDataContainer();
     st.always = pdc.getOrDefault(kAlways, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.always", false) ? 1 : 0)) == 1;
-    st.showOutline = pdc.getOrDefault(kOutline, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.outline", true) ? 1 : 0)) == 1;
+    st.showBox = pdc.getOrDefault(kBox, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.box", true) ? 1 : 0)) == 1;
     st.brush = pdc.getOrDefault(kBrush, PersistentDataType.BYTE, (byte) (getConfig().getBoolean("defaults.brush", true) ? 1 : 0)) == 1;
     try {
       st.style = PlayerState.StyleMode.valueOf(pdc.getOrDefault(kStyle, PersistentDataType.STRING, "AUTO"));
@@ -135,7 +132,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   private void save(PlayerState st) {
     var pdc = st.player.getPersistentDataContainer();
     pdc.set(kAlways, PersistentDataType.BYTE, (byte) (st.always ? 1 : 0));
-    pdc.set(kOutline, PersistentDataType.BYTE, (byte) (st.showOutline ? 1 : 0));
+    pdc.set(kBox, PersistentDataType.BYTE, (byte) (st.showBox ? 1 : 0));
     pdc.set(kBrush, PersistentDataType.BYTE, (byte) (st.brush ? 1 : 0));
     pdc.set(kStyle, PersistentDataType.STRING, st.style.name());
   }
@@ -261,7 +258,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         if (st.always) live(st, now);
         if (st.always && st.brush && tick % 3 == 0) brush(st);
         else if ((!st.always || !st.brush) && st.source == PlayerState.Source.BRUSH) st.clearPreview();
-        if (tick % 4 == 0) st.outline.show(st.showOutline ? selection(st.player).plus(st.previewBox) : st.previewBox);
+        if (tick % 4 == 0) st.outline.show(st.showBox ? st.previewBox : Shape.empty());
         st.fake.flush();
       } catch (Throwable t) {
         getLogger().warning("預覽更新失敗（" + st.player.getName() + "）：" + t);
@@ -376,25 +373,6 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     show(st, writes, out.capture().style, PlayerState.Source.BRUSH);
   }
 
-  private static Shape selection(Player p) {
-    LocalSession s = WorldEdit.getInstance().getSessionManager().getIfPresent(BukkitAdapter.adapt(p));
-    if (s == null) return Shape.empty();
-    var w = s.getSelectionWorld();
-    // 只在同一個世界取選取器：getRegionSelector 換世界會清掉選區
-    if (w == null || !w.getName().equals(p.getWorld().getName())) return Shape.empty();
-    RegionSelector sel = s.getRegionSelector(w);
-    try {
-      if (sel.isDefined()) return Shapes.region(sel.getRegion());
-    } catch (IncompleteRegionException ignored) {
-      // 往下
-    }
-    try {
-      return Shapes.point(sel.getPrimaryPosition());
-    } catch (IncompleteRegionException e) {
-      return Shape.empty();
-    }
-  }
-
   // ---------------- /pev ----------------
 
   @Override
@@ -425,10 +403,10 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         info(p, Component.text("恆預覽：" + (st.always ? "開（WorldEdit 指令只試跑，按 [套用] 才寫入；打字與筆刷即時預覽）" : "關"),
             st.always ? NamedTextColor.GREEN : NamedTextColor.GRAY));
       }
-      case "outline" -> {
-        st.showOutline = toggle(args, st.showOutline);
+      case "box" -> {
+        st.showBox = toggle(args, st.showBox);
         save(st);
-        info(p, Component.text("選區邊框：" + (st.showOutline ? "開" : "關"), NamedTextColor.GRAY));
+        info(p, Component.text("預覽範圍框：" + (st.showBox ? "開" : "關"), NamedTextColor.GRAY));
       }
       case "brush" -> {
         st.brush = toggle(args, st.brush);
@@ -513,7 +491,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         {"/pev mask <遮罩>", "選區中符合遮罩的方塊顯示綠色玻璃"},
         {"/pev pattern <pattern>", "預覽選區換成 pattern"},
         {"/pev style auto|blocks|glass", "試跑的顯示方式（auto：有遮罩或 replace 用綠色玻璃）"},
-        {"/pev outline [on|off]", "選區邊框（目前 " + (st.showOutline ? "開" : "關") + "）"},
+        {"/pev box [on|off]", "預覽外圍的黃框與格數標籤（目前 " + (st.showBox ? "開" : "關") + "）"},
         {"/pev brush [on|off]", "恆預覽中的筆刷預覽（目前 " + (st.brush ? "開" : "關") + "）"},
     };
     info(p, Component.text("WorldEdit 預覽", NamedTextColor.AQUA));
@@ -526,13 +504,13 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
     if (args.length == 1) {
       List<String> out = new ArrayList<>();
-      for (String s : List.of("always", "apply", "clear", "mask", "pattern", "style", "outline", "brush", "help"))
+      for (String s : List.of("always", "apply", "clear", "mask", "pattern", "style", "box", "brush", "help"))
         if (s.startsWith(args[0].toLowerCase(Locale.ROOT))) out.add(s);
       return out;
     }
     if (args.length == 2) {
       return switch (args[0].toLowerCase(Locale.ROOT)) {
-        case "always", "outline", "brush" -> List.of("on", "off");
+        case "always", "box", "brush" -> List.of("on", "off");
         case "style" -> List.of("auto", "blocks", "glass");
         default -> List.of();
       };

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 端對端：選區邊框、-pev 試跑與套用、replace 玻璃、gmask、恆預覽（打字、Enter 試跑）、筆刷
+# 端對端：-pev 試跑與套用、replace 玻璃、gmask、恆預覽（打字、Enter 試跑）、筆刷
 . "$(dirname "$0")/lib.sh"
 cmd "gamemode creative $NAME"
 cmd "time set noon"
@@ -11,22 +11,26 @@ cmd "fill -3 -60 -3 3 -60 3 stone"
 look 0 -60 -14 0 -58 0
 chat "/pev always off"
 chat "/pev style auto"
+chat "/pev box on"
 chat "/pev clear"
 chat "//gmask"
 
-# 1. 選區邊框（7×5×7：12 條邊＋2 個角）
+# 1. 選區（邊框交給其他插件，這裡不畫）
 chat "//sel cuboid"
 chat "//pos1 -3,-60,-3"
 chat "//pos2 3,-56,3"
-ok outline 'waitfor "[ \"\$(dbg outline)\" -ge 14 ]" 3'
-shot 01-outline
+ok no_selection_outline '[ "$(dbg outline)" = 0 ]'
 
 # 2. -pev：只試跑，顯示寫入後的方塊（不是玻璃）
 chat "//set oak_planks -pev"
 ok pev_source 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8'
 ok pev_blocks '[ "$(dbg fake)" -gt 0 ] && [ "$(dbg glass)" = 0 ]'
 ok pev_world_untouched 'isblock 0 -58 0 air && isblock 0 -60 0 stone'
+ok pev_box '[ "$(dbg box)" = 12 ] && [ "$(dbg outline)" -ge 12 ]'
 shot 02-pev-set
+chat "/pev box off"
+ok box_off 'waitfor "[ \"\$(dbg outline)\" = 0 ]" 3 && [ "$(dbg fake)" -gt 0 ]'
+chat "/pev box on"
 
 # 3. 套用
 chat "/pev apply"
@@ -89,4 +93,21 @@ ok brush_undo 'waitfor "isblock 0 -61 -5 grass_block" 6'
 chat "/pev always off"
 ok brush_off 'waitfor "[ \"\$(dbg source)\" = NONE ]" 3'
 cmd "item replace entity $NAME weapon.mainhand with minecraft:air"
+
+# 10. FAWE 魔法選取（//sel fuzzy）：選到相連的 49 格石頭
+if grep -aq '預覽已啟用（FastAsyncWorldEdit）' "$LOG"; then
+  look 0 -60 -14 0 -58 0
+  chat "//sel fuzzy"
+  chat "//pos1 0,-60,0"
+  chat "//set gold_block -pev"
+  ok fuzzy_pev 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && [ "$(dbg fake)" = 49 ] && isblock 0 -60 0 stone'
+  shot 08-fuzzy
+  chat "/pev clear"
+  chat "/pev always on"
+  typeonly "//set glowstone"
+  ok fuzzy_live 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg fake)\" = 49 ]" 5'
+  esc
+  chat "/pev always off"
+  chat "//sel cuboid"
+fi
 done_
