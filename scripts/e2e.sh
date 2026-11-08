@@ -39,7 +39,7 @@ ok select_flash_again 'waitfor "[ \"\$(dbg source)\" = SELECTION ]" 3'
 ok select_flash_ends2 'waitfor "[ \"\$(dbg source)\" = NONE ]" 6'
 
 # 2. -pev: dry-run only, shows the resulting blocks (not glass)
-chat "//set oak_planks -pev"
+chat "//set oak_planks -pev 60"
 ok pev_source 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8'
 ok pev_blocks '[ "$(dbg fake)" -gt 0 ] && [ "$(dbg glass)" = 0 ]'
 ok pev_world_untouched 'isblock 0 -58 0 air && isblock 0 -60 0 stone'
@@ -61,7 +61,7 @@ chat "//undo"
 ok undo_once 'waitfor "isblock 0 -58 0 air" 6 && isblock 0 -60 0 stone'
 
 # 5. replace: lime glass (only the 49 stone blocks)
-chat "//replace stone gold_block --pev"
+chat "//replace stone gold_block --pev 60"
 ok replace_glass 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && [ "$(dbg glass)" = 49 ]'
 ok replace_untouched 'isblock 0 -60 0 stone'
 shot 03-replace-glass
@@ -69,7 +69,7 @@ chat "/pev clear"
 
 # 6. gmask: //set only touches gmask matches, shown as glass
 chat "//gmask stone"
-chat "//set gold_block -pev"
+chat "//set gold_block -pev 60"
 ok gmask_glass 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && [ "$(dbg glass)" = 49 ]'
 chat "/pev clear"
 
@@ -97,7 +97,7 @@ ok always_enter_cleared 'waitfor "[ \"\$(dbg source)\" = NONE ] && [ \"\$(dbg ar
 chat "//undo"
 ok always_undo 'waitfor "isblock 0 -60 0 stone" 6'
 # with -pev it still only dry-runs
-chat "//set glowstone -pev"
+chat "//set glowstone -pev 60"
 ok always_pev_dryrun 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && isblock 0 -60 0 stone && isblock 0 -58 0 air'
 chat "/pev clear"
 
@@ -168,7 +168,7 @@ if grep -aq 'Preview enabled (FastAsyncWorldEdit)' "$LOG"; then
   look 0 -60 -14 0 -58 0
   chat "//sel fuzzy"
   chat "//pos1 0,-60,0"
-  chat "//set gold_block -pev"
+  chat "//set gold_block -pev 60"
   ok fuzzy_pev 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && [ "$(dbg fake)" = 49 ] && isblock 0 -60 0 stone'
   shot 08-fuzzy
   chat "/pev clear"
@@ -180,15 +180,26 @@ if grep -aq 'Preview enabled (FastAsyncWorldEdit)' "$LOG"; then
   chat "//sel cuboid"
 fi
 
-# 12. Dry-run previews expire after dry-run-timeout (15 s) without writing anything
+# 12. Dry-run previews expire: default dry-run-timeout (5 s), per command -pev N, -pev 0 = until cleared
 chat "//pos1 -3,-60,-3"
 chat "//pos2 3,-56,3"
 chat "//set oak_planks --pev"
-ok expire_start 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8'
+ok expire_start 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && lastis "//set oak_planks"'
 T0=$(date +%s)
-ok expire_kept 'sleep 10; [ "$(dbg source)" = COMMAND ]'
-ok expire_cleared 'waitfor "[ \"\$(dbg source)\" = NONE ]" 10 && [ $(( $(date +%s) - T0 )) -ge 13 ] && [ "$(dbg last)" = null ]'
+ok expire_default 'waitfor "[ \"\$(dbg source)\" = NONE ]" 8 && [ $(( $(date +%s) - T0 )) -ge 3 ] && [ "$(dbg last)" = null ]'
 ok expire_untouched 'isblock 0 -58 0 air && isblock 0 -60 0 stone'
 chat "/pev apply"
 ok expire_no_apply 'sleep 1; isblock 0 -58 0 air'
+chat "//set oak_planks -pev 12"
+ok expire_n_start 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && lastis "//set oak_planks"'
+T0=$(date +%s)
+ok expire_n_kept 'sleep 8; [ "$(dbg source)" = COMMAND ]'
+ok expire_n_cleared 'waitfor "[ \"\$(dbg source)\" = NONE ]" 8 && [ $(( $(date +%s) - T0 )) -ge 10 ]'
+chat "//set oak_planks --pev 0"
+ok expire_zero_start 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8'
+ok expire_zero_kept 'sleep 8; [ "$(dbg source)" = COMMAND ] && isblock 0 -58 0 air'
+chat "/pev apply"
+ok expire_zero_apply 'waitfor "isblock 0 -58 0 oak_planks" 6'
+chat "//undo"
+ok expire_zero_undo 'waitfor "isblock 0 -58 0 air" 6'
 done_

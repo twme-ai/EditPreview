@@ -16,8 +16,9 @@ Previews are sent only to the player who made them (fake blocks), never touch th
 
 - **`-pev` / `--pev` dry-run**: append `-pev` (or `--pev`) to any block-changing WorldEdit command
   (e.g. `//set stone -pev`, `//replace dirt grass_block --pev`). The command runs as usual, but every write is intercepted
-  and shown as a preview instead, with **[Apply]** / **[Cancel]** buttons. The preview disappears after 15 seconds
-  (`dry-run-timeout`). Commands without the flag always run for real.
+  and shown as a preview instead, with **[Apply]** / **[Cancel]** buttons. The preview disappears after 5 seconds
+  (`dry-run-timeout`); put a number of seconds right after the flag to choose per command: `//set stone -pev 30` keeps
+  it for 30 s, `-pev 0` until you clear or apply it. Commands without the flag always run for real.
   - **Preview while typing**: as soon as `-pev` appears in the chat box (before Enter), the preview starts.
     `//set` and `//replace` update on every keystroke; other commands (`//walls`, `//stack`, `//smooth`, …) are dry-run
     once in capture mode after typing pauses for 0.6 s. Deleting `-pev` clears the preview.
@@ -77,7 +78,7 @@ max-capture: 1000000     # max blocks captured per dry-run (beyond this still no
 max-display: 150000      # max fake blocks sent (beyond this, the blocks nearest to the player are kept)
 live-max-volume: 262144  # typing preview pauses above this selection volume (Enter still dry-runs)
 brush-max-size: 32       # brushes larger than this are not previewed
-dry-run-timeout: 15      # seconds before a dry-run preview disappears (0 = keep until cleared)
+dry-run-timeout: 5       # seconds before a dry-run preview disappears (0 = keep until cleared; per command: -pev N)
 selection-flash:
   ticks: 60              # flash duration (20 ticks = 1 second)
   max-volume: 262144     # larger selections don't flash
@@ -126,7 +127,7 @@ defaults:                # per-player defaults
 ```sh
 ./gradlew build           # build/libs/EditPreview-<version>.jar
 scripts/restart.sh        # deploy to the test server and restart server + client
-scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 50 checks; WorldEdit 7.4.6: 47, FAWE-only checks skipped)
+scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 56 checks; WorldEdit 7.4.6: 53, FAWE-only checks skipped)
 scripts/persist.sh        # settings survive a server crash (kill -9)
 ```
 

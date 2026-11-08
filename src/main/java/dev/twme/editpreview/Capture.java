@@ -33,6 +33,8 @@ public final class Capture {
   volatile boolean sessionSeen, overflow, committed;
   /** Auto dry-run while typing (with -pev): shown as a typing preview, no chat message */
   volatile boolean live;
+  /** Seconds the dry-run preview stays (-pev N); -1 = config default, 0 = until cleared */
+  volatile double seconds = -1;
 
   Capture(UUID player, String command, Style style, boolean applicable, boolean explicit, int max) {
     this.player = player;

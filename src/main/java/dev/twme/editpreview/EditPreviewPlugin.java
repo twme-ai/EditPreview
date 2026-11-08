@@ -89,7 +89,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     liveMax = getConfig().getInt("live-max-volume", 262_144);
     brushMax = getConfig().getDouble("brush-max-size", 32);
     flashTicks = getConfig().getInt("selection-flash.ticks", 60);
-    dryRunTicks = (int) Math.round(getConfig().getDouble("dry-run-timeout", 15) * 20);
+    dryRunTicks = (int) Math.round(getConfig().getDouble("dry-run-timeout", 5) * 20);
     flashMax = getConfig().getInt("selection-flash.max-volume", 262_144);
     kAlways = new NamespacedKey(this, "always");
     kBrush = new NamespacedKey(this, "brush");
@@ -239,6 +239,27 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     return arg.equalsIgnoreCase("-pev") || arg.equalsIgnoreCase("--pev");
   }
 
+  /** A duration after the flag: -pev 30 (seconds; 0 = until cleared). */
+  static boolean isSeconds(String arg) {
+    return arg.matches("\\d{1,5}(\\.\\d+)?");
+  }
+
+  /** The command split into its words without the flag (and its duration); seconds = -1 when not given. */
+  record Flag(boolean on, double seconds, List<String> kept) {}
+
+  static Flag flag(String[] parts) {
+    boolean on = false;
+    double seconds = -1;
+    List<String> kept = new ArrayList<>();
+    for (int i = 0; i < parts.length; i++) {
+      if (i > 0 && isPev(parts[i])) {
+        on = true;
+        if (i + 1 < parts.length && isSeconds(parts[i + 1])) seconds = Double.parseDouble(parts[++i]);
+      } else kept.add(parts[i]);
+    }
+    return new Flag(on, seconds, kept);
+  }
+
   /** The command (chat buffer) contains a standalone -pev / --pev. */
   static boolean hasPev(String buffer) {
     String[] parts = buffer.split(" ");
@@ -281,12 +302,9 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
 
-    boolean flag = false;
-    List<String> kept = new ArrayList<>();
-    for (int i = 0; i < parts.length; i++) {
-      if (i > 0 && isPev(parts[i])) flag = true;
-      else kept.add(parts[i]);
-    }
+    Flag fl = flag(parts);
+    boolean flag = fl.on();
+    List<String> kept = fl.kept();
     String clean = "/" + String.join(" ", kept).stripTrailing();
     if (flag) e.setMessage(clean);
     st.typed = null; // sent: typing preview is over
@@ -298,6 +316,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         Capture c = st.pendingConfirm;
         st.pendingConfirm = null;
         st.armed = new Capture(p.getUniqueId(), c.command, c.style, c.applicable, c.explicit, maxCapture);
+        st.armed.seconds = c.seconds;
       }
       return;
     }
@@ -311,6 +330,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
     st.armed = new Capture(p.getUniqueId(), clean, style(st, label, kept, p), true, flag, maxCapture);
+    st.armed.seconds = fl.seconds();
   }
 
   private Capture.Style style(PlayerState st, String label, List<String> args, Player p) {
@@ -414,10 +434,12 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       return;
     }
     show(st, writes, c.style, PlayerState.Source.COMMAND);
+    if (c.seconds >= 0) st.commandUntil = c.seconds == 0 ? 0 : tick + Math.max(1, Math.round(c.seconds * 20));
     st.lastCommand = c.applicable ? c.command : null;
     Component m = Component.text("Dry-run ", NamedTextColor.GRAY)
         .append(Component.text(c.command, NamedTextColor.WHITE))
-        .append(Component.text(": " + String.format("%,d", writes.size()) + " blocks (not written yet)", NamedTextColor.GRAY));
+        .append(Component.text(": " + String.format("%,d", writes.size()) + " blocks (not written yet"
+            + (st.commandUntil > 0 ? ", disappears in " + fmtSeconds((st.commandUntil - tick) / 20.0) + " s" : "") + ")", NamedTextColor.GRAY));
     if (c.overflow) m = m.append(Component.text(" Limit exceeded, only the first " + String.format("%,d", maxCapture) + " blocks were captured", NamedTextColor.GOLD));
     m = m.append(Component.text("  "));
     if (c.applicable) m = m.append(button("[Apply]", NamedTextColor.GREEN, "/pev apply", "Run the command for real, as previewed")).append(Component.text(" "));
@@ -507,8 +529,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       if (st.source == PlayerState.Source.LIVE) st.clearPreview();
       return;
     }
-    List<String> kept = new ArrayList<>();
-    for (int i = 0; i < parts.length; i++) if (i == 0 || !isPev(parts[i])) kept.add(parts[i]);
+    List<String> kept = flag(parts).kept();
     if (NEVER.contains(label)) {
       p.sendActionBar(Component.text("This command cannot be previewed", NamedTextColor.RED));
       return;
@@ -721,6 +742,10 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     return p.getNearbyEntities(64, 64, 64).stream().filter(e -> e instanceof org.bukkit.entity.Display).count();
   }
 
+  private static String fmtSeconds(double s) {
+    return s == Math.rint(s) ? String.valueOf((long) s) : String.format(Locale.ROOT, "%.1f", s);
+  }
+
   private static String onOff(boolean b) {
     return b ? "on" : "off";
   }
@@ -738,7 +763,8 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     String[][] lines = {
         {"/pev always [on|off]", "Always-preview: //set, //replace and brushes preview live while typing / aiming; Enter still executes (now "
             + onOff(st.always) + ")"},
-        {"<WorldEdit command> -pev", "Dry-run just this command (--pev works too; previews while typing)"},
+        {"<WorldEdit command> -pev [seconds]", "Dry-run just this command (--pev works too; previews while typing; the preview stays "
+            + fmtSeconds(dryRunTicks / 20.0) + " s unless you give seconds, 0 = until cleared)"},
         {"/pev apply", "Run the last dry-run for real"},
         {"/pev clear", "Clear the preview"},
         {"/pev mask <mask>", "Show blocks in the selection matching the mask as lime glass"},

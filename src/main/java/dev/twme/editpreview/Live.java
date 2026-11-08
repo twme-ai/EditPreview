@@ -64,7 +64,11 @@ final class Live {
     List<String> args = new ArrayList<>();
     for (int i = 1; i < parts.length; i++) {
       String a = parts[i];
-      if (a.isEmpty() || EditPreviewPlugin.isPev(a)) continue;
+      if (a.isEmpty()) continue;
+      if (EditPreviewPlugin.isPev(a)) {
+        if (i + 1 < parts.length && EditPreviewPlugin.isSeconds(parts[i + 1])) i++; // -pev N: preview duration
+        continue;
+      }
       if (a.length() == 2 && a.charAt(0) == '-' && Character.isLetter(a.charAt(1))) continue; // flag
       args.add(a);
     }
