@@ -20,17 +20,17 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 吞下所有寫入的 extent：寫入只記進 {@link Capture}，讀取時先看記下來的（同一個指令後面的步驟看得到前面的結果）。
+ * An extent that swallows all writes: they are only recorded in the {@link Capture}, and reads see recorded values first (later steps of the same command see earlier results).
  * <p>
- * 原版 WorldEdit 掛在 BEFORE_HISTORY（遮罩之後、歷史之前），所以歷史裡什麼都沒有。
- * FAWE 找不到佇列時才用它；FAWE 的整批寫入（setBlocks、replaceBlocks…）預設會直接往下交給佇列，
- * 所以這裡把它們都改成逐格記錄。這些方法只有 FAWE 的 Extent 才有，故不加 @Override。
+ * In vanilla WorldEdit it sits at BEFORE_HISTORY (after masks, before history), so history stays empty.
+ * With FAWE it is used only when no queue is found; FAWE bulk writes (setBlocks, replaceBlocks…) go straight to the queue by default,
+ * so they are overridden to record block by block. Only FAWE's Extent has these methods, hence no @Override.
  */
 public final class CaptureExtent extends AbstractDelegateExtent {
   private final Capture cap;
   /**
-   * 原版 WorldEdit 的 extent 鏈由內到外是 世界 → 重排 → 歷史 → 遮罩（MaskingExtent）→ 數量上限 → BEFORE_HISTORY，
-   * 所以這一層在遮罩「外面」：寫入要先問下面那層 MaskingExtent 的遮罩（gmask、筆刷遮罩；EditSession 建好後才設也讀得到）。
+   * Vanilla WorldEdit's extent chain, inside out: world → reorder → history → mask (MaskingExtent) → block limit → BEFORE_HISTORY,
+   * so this layer sits outside the mask: writes must check the MaskingExtent below (gmask, brush mask; also read if set after the EditSession is built).
    */
   private final MaskingExtent masking;
 
@@ -116,7 +116,7 @@ public final class CaptureExtent extends AbstractDelegateExtent {
     return null;
   }
 
-  // ---- FAWE 的整批寫入：改成逐格 ----
+  // ---- FAWE bulk writes: record block by block ----
 
   public <B extends BlockStateHolder<B>> int setBlocks(Region region, B block) {
     BlockState s = block.toImmutableState();

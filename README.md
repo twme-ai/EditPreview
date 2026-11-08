@@ -1,90 +1,123 @@
 # EditPreview
 
-為 WorldEdit / FastAsyncWorldEdit 加上「先看再寫」的方塊預覽：指令試跑、打字即時預覽、筆刷瞄準預覽。
-選區邊框請搭配其他插件（WorldEditCUI、WorldEditDisplay 等），本插件不畫選區。
-預覽只送給該玩家（顯示實體＋假方塊），不會改到世界，也不會留下 `//undo` 歷史。
+"Look before you write" block previews for WorldEdit / FastAsyncWorldEdit: command dry-runs, live typing previews,
+brush aim previews and a brief lime-glass flash of every new selection.
+Selection outlines are left to other plugins (WorldEditCUI, WorldEditDisplay, …); this plugin draws no lines at all.
+Previews are sent only to the player who made them (fake blocks), never touch the world, and leave no `//undo` history.
 
-- Paper 1.21.x（使用 `AsyncTabCompleteEvent`、`sendMultiBlockChange`），Java 21
-- WorldEdit 7.4+ 或 FastAsyncWorldEdit 2.x（擇一）
+- Paper 1.21.x (uses `AsyncTabCompleteEvent`, `sendMultiBlockChange`), Java 21
+- WorldEdit 7.4+ or FastAsyncWorldEdit 2.x (either one)
 
-| 試跑 `//set` | `//replace` 遮罩（綠玻璃） | 筆刷 | 魔法選取（FAWE） | 打字中 `-pev` |
-|---|---|---|---|---|
-| ![](docs/pev-set.png) | ![](docs/replace-glass.png) | ![](docs/brush.png) | ![](docs/fuzzy.png) | ![](docs/typed-walls.png) |
+| Selection flash | Dry-run `//set` | `//replace` mask (lime glass) | Brush | Magic select (FAWE) | Typing `-pev` |
+|---|---|---|---|---|---|
+| ![](docs/select-flash.png) | ![](docs/pev-set.png) | ![](docs/replace-glass.png) | ![](docs/brush.png) | ![](docs/fuzzy.png) | ![](docs/typed-walls.png) |
 
-## 功能
+## Features
 
-- **`-pev` 試跑**：任何會改方塊的 WorldEdit 指令後面加 `-pev`（例如 `//set stone -pev`、`//replace dirt grass_block -pev`），
-  指令照常執行但寫入全被攔下，改成預覽，並給出 **[套用]**／**[取消]** 按鈕。黃色框標出受影響範圍。
-  - **打字時就預覽**：在聊天欄打出 `-pev`（還沒按 Enter）就開始預覽。`//set`、`//replace` 每打一個字即時更新；
-    其他指令（`//walls`、`//stack`、`//smooth`…）停手 0.6 秒後在攔截模式下試跑一次。刪掉 `-pev` 預覽就收掉。
-    會改剪貼簿（`//cut`）或帶 `-s` 移動選區（`//move`、`//stack`、`//paste`）的指令不在打字時試跑，按 Enter 才試跑。
-- **恆預覽**（`/pev always on`）：不用加 `-pev`，WorldEdit 編輯指令一律先試跑，按 [套用] 才真的寫入。
-  - **打字即時預覽**：在聊天欄打 `//set <pattern>` 時即時顯示 pattern 結果；
-    打 `//replace <遮罩>` 時用綠色玻璃標出會被取代的方塊，接著打 `<pattern>` 就變成真實方塊預覽。
-  - **筆刷**：拿著筆刷瞄準時顯示這一刷的結果；真的點下去照常寫入。
-- **遮罩**：一律尊重 `//gmask`、`-m` 遮罩與筆刷遮罩。`replace` 類指令、有遮罩時預設用綠色透明玻璃顯示「會被影響的方塊」，
-  其餘顯示寫入後的真實方塊（可用 `/pev style` 改）。
-- **任何選區都適用**：預覽是攔下指令實際的寫入，與選區形狀無關；FAWE 的魔法選取（`//sel fuzzy`）、polyhedral 等也一樣。
-- 預覽外圍有黃色範圍框與「預覽：N 格」標籤，方便找到預覽（`/pev box off` 可關）。
-- FAWE 需要 `//confirm` 的大型操作：確認後一樣進入預覽。
+- **`-pev` / `--pev` dry-run**: append `-pev` (or `--pev`) to any block-changing WorldEdit command
+  (e.g. `//set stone -pev`, `//replace dirt grass_block --pev`). The command runs as usual, but every write is intercepted
+  and shown as a preview instead, with **[Apply]** / **[Cancel]** buttons.
+  - **Preview while typing**: as soon as `-pev` appears in the chat box (before Enter), the preview starts.
+    `//set` and `//replace` update on every keystroke; other commands (`//walls`, `//stack`, `//smooth`, …) are dry-run
+    once in capture mode after typing pauses for 0.6 s. Deleting `-pev` clears the preview.
+    Commands that change the clipboard (`//cut`) or move the selection with `-s` (`//move`, `//stack`, `//paste`)
+    are not dry-run while typing; press Enter to dry-run them.
+- **Always-preview** (`/pev always on`): no flag needed; every WorldEdit edit command is dry-run first and only written
+  when you click [Apply].
+  - **Live typing preview**: typing `//set <pattern>` shows the pattern result live; typing `//replace <mask>` marks the
+    blocks that would be replaced in lime glass, and once you type `<pattern>` it becomes a real block preview.
+  - **Brush**: holding a brush and aiming shows the result of that stroke; clicking writes as usual.
+- **Selection flash** (`/pev select`, on by default, independent of always-preview): whenever a selection is completed
+  or changed, its exposed blocks flash as lime glass for 3 seconds — any selector shape, including FAWE magic select.
+- **Carving** (`/pev carve`, on by default): fake blocks along your line of sight and around your body are hidden, so a
+  preview never gets in the way of clicking, placing positions or moving around.
+- **Masks**: `//gmask`, `-m` masks and brush masks are always respected. `replace`-like commands and masked edits show
+  "affected blocks" as translucent lime glass by default; everything else shows the resulting blocks
+  (change it with `/pev style`).
+- **Any selection works**: the preview is the command's real writes, independent of the selection shape; FAWE magic
+  select (`//sel fuzzy`), polyhedral, etc. all work.
+- FAWE operations that need `//confirm`: after confirming they are previewed the same way.
 
-## 指令
+## Commands
 
-權限 `editpreview.use`（預設所有人）。設定存在玩家資料（PDC），重進伺服器仍保留。
+Permission `editpreview.use` (everyone by default). Settings are stored in the player's data (PDC) and survive rejoins.
 
-| 指令 | 說明 |
+| Command | Description |
 |---|---|
-| `/pev always [on\|off]` | 恆預覽開關 |
-| `/pev box [on\|off]` | 預覽外圍的黃框與格數標籤 |
-| `/pev brush [on\|off]` | 筆刷預覽開關 |
-| `/pev style <auto\|blocks\|glass>` | 預覽樣式：自動／一律真實方塊／一律綠玻璃 |
-| `/pev apply` | 套用目前的試跑（重新執行原指令） |
-| `/pev clear`（`cancel`） | 清掉預覽 |
-| `/pev mask <遮罩>` | 用綠玻璃標出選區裡符合遮罩的方塊 |
-| `/pev pattern <pattern>` | 預覽選區套上 pattern 的樣子，可直接 [套用 //set] |
-| `/pev help` | 說明 |
+| `/pev always [on\|off]` | Always-preview |
+| `/pev brush [on\|off]` | Brush preview |
+| `/pev select [on\|off]` | Lime-glass flash of new selections |
+| `/pev carve [on\|off]` | Carve the preview around your line of sight and body |
+| `/pev style <auto\|blocks\|glass>` | Preview style: automatic / always real blocks / always lime glass |
+| `/pev apply` | Apply the current dry-run (re-runs the original command) |
+| `/pev clear` (`cancel`) | Clear the preview |
+| `/pev mask <mask>` | Mark blocks in the selection that match a mask, as lime glass |
+| `/pev pattern <pattern>` | Preview the selection with a pattern applied, with an [Apply //set] button |
+| `/pev help` | Help |
 
-不會被攔的指令：`//undo`、`//redo`、選區／筆刷／工具／遮罩設定、傳送（`/up`、`/ascend`…）等不改方塊的指令。
-不能預覽的指令：`//butcher`、`//remove`（移除實體不經過方塊寫入，攔不下來；加 `-pev` 會被擋下）。
+Not intercepted: `//undo`, `//redo`, selection / brush / tool / mask settings, teleports (`/up`, `/ascend`, …) and other
+commands that change no blocks.
+Not previewable: `//butcher`, `//remove` (entity removal bypasses block writes and cannot be intercepted; with `-pev`
+they are blocked).
 
-## 設定（config.yml）
+## Configuration (config.yml)
 
 ```yaml
-max-capture: 1000000     # 一次試跑最多收幾格（超過的仍不寫入，只是不顯示）
-max-display: 150000      # 最多送幾格假方塊（超過時留離玩家最近的）
-live-max-volume: 262144  # 打字預覽：選區超過這個體積就暫停（按 Enter 仍會試跑）
-brush-max-size: 32       # 筆刷大小超過這個就不預覽
-defaults: { always: false, box: true, brush: true }
+max-capture: 1000000     # max blocks captured per dry-run (beyond this still nothing is written, just not shown)
+max-display: 150000      # max fake blocks sent (beyond this, the blocks nearest to the player are kept)
+live-max-volume: 262144  # typing preview pauses above this selection volume (Enter still dry-runs)
+brush-max-size: 32       # brushes larger than this are not previewed
+selection-flash:
+  ticks: 60              # flash duration (20 ticks = 1 second)
+  max-volume: 262144     # larger selections don't flash
+defaults:                # per-player defaults
+  always: false
+  brush: true
+  selection-flash: true
+  carve: true
 ```
 
-## 運作方式
+## How it works
 
-- **攔截寫入**
-  - 原版 WorldEdit：在 `EditSessionEvent` 的 `BEFORE_HISTORY` 階段包一層 `CaptureExtent`，把寫入記下來、不往下傳；
-    讀取時先回傳記下的結果（同一指令後續步驟看得到前面的變更）。遮罩取自下層的 `MaskingExtent`。
-  - FAWE：在 `BEFORE_CHANGE` 找到佇列，掛上一個 `IBatchProcessor`（scope `CUSTOM`：排在遮罩之後、歷史之前），
-    記下每個 chunk 要寫的方塊後把那批清空，所以世界與歷史都沒有變化。找不到佇列時退回 `CaptureExtent`。
-- **觸發**：`PlayerCommandPreprocessEvent` 偵測 `-pev`（或恆預覽），把旗標拿掉後讓指令照常跑；[套用] 以不帶旗標的原指令再執行一次。
-- **打字預覽**：客戶端每打一個字都會要補全，從 `AsyncTabCompleteEvent` 讀到目前的聊天內容，停手 250 ms 後用 WorldEdit 的
-  遮罩／pattern 解析器在選區上計算。
-- **筆刷預覽**：照 `BrushTool` 的流程（瞄準、大小、材質、遮罩）自己建一個 EditSession 呼叫 `brush.build`，寫入全被攔下。
-- **顯示**：範圍框與標籤是只對該玩家可見的 `BlockDisplay`／`TextDisplay`；方塊預覽是 `sendMultiBlockChange` 假方塊，
-  被完全包住的格子不送，以減少數量。
+- **Intercepting writes**
+  - WorldEdit: at the `BEFORE_HISTORY` stage of `EditSessionEvent` a `CaptureExtent` records writes and does not pass
+    them on; reads return the recorded result first (so later steps of the same command see earlier changes).
+    The mask is taken from the underlying `MaskingExtent`.
+  - FAWE: at `BEFORE_CHANGE` the queue is located and an `IBatchProcessor` (scope `CUSTOM`: after masks, before
+    history) records each chunk's writes and then empties the batch, so neither the world nor history changes.
+    Falls back to `CaptureExtent` if no queue is found.
+- **Trigger**: `PlayerCommandPreprocessEvent` detects `-pev` / `--pev` (or always-preview), strips the flag and lets the
+  command run; [Apply] re-runs the original command without the flag.
+- **Typing preview**: the client requests completions on every keystroke; `AsyncTabCompleteEvent` provides the current
+  chat buffer, and after a 250 ms pause it is evaluated on the selection with WorldEdit's mask / pattern parsers.
+- **Brush preview**: follows `BrushTool` (aim, size, material, mask) with its own EditSession calling `brush.build`,
+  with all writes intercepted.
+- **Selection flash**: the player's WorldEdit selection is polled every 4 ticks; when it changes to a complete region,
+  the region is shown as lime glass (only exposed blocks are sent).
+- **Display**: previews are `sendMultiBlockChange` fake blocks; fully enclosed blocks are not sent. Carving recomputes,
+  every 2 ticks, which fake blocks lie in a tube along the line of sight (up to the first real block hit) or in a column
+  around the player, and sends only the difference.
 
-## 限制
+## Limitations
 
-- 預覽是「跑一次指令」，`//set` 這類 pattern 若含隨機成分，[套用] 時會重新隨機。
-- 不預覽實體與生物群系的變更。
-- 打字試跑會真的執行指令（只是不寫入），所以聊天欄會出現 WorldEdit 的訊息；參數打到一半時也可能出現錯誤訊息。
-- 試跑時 WorldEdit／FAWE 仍會印出「Operation completed (N)」「history: N changed」等訊息，那只是指令自己的計數，世界與歷史都沒有變。
-- 假方塊在玩家點擊、chunk 重載時可能被客戶端換回真實方塊；`/pev clear` 會還原。
+- A preview is "running the command once": patterns with randomness are re-rolled on [Apply].
+- Entity and biome changes are not previewed.
+- Typing dry-runs really run the command (just without writing), so WorldEdit messages appear in chat; half-typed
+  arguments may produce error messages.
+- During a dry-run WorldEdit / FAWE still print "Operation completed (N)" or "history: N changed"; those are just the
+  command's own counters — neither the world nor history changed.
+- Fake blocks may revert to real blocks on the client when clicked or when chunks reload; `/pev clear` restores them.
 
-## 建置與測試
+## Building and testing
 
 ```sh
-./gradlew build           # build/libs/EditPreview-<版本>.jar
-scripts/restart.sh        # 部署到測試伺服器並重開伺服器＋客戶端
-scripts/e2e.sh            # 端對端測試（FAWE 2.16.1：31 項；原版 WorldEdit 7.4.6：29 項，跳過 FAWE 專屬項目）
+./gradlew build           # build/libs/EditPreview-<version>.jar
+scripts/restart.sh        # deploy to the test server and restart server + client
+scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 39 checks; WorldEdit 7.4.6: 37, FAWE-only checks skipped)
 ```
 
-測試腳本需要本機的 Paper 測試伺服器、Minecraft 客戶端、Xvfb 與 xdotool，路徑在 `scripts/env.sh`。
+The test scripts need a local Paper test server, a Minecraft client, Xvfb and xdotool; paths are in `scripts/env.sh`.
+
+## License
+
+[MIT](LICENSE) © TWME-TW

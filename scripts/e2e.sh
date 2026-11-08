@@ -1,59 +1,79 @@
 #!/usr/bin/env bash
-# 端對端：-pev 試跑與套用、replace 玻璃、gmask、恆預覽（打字、Enter 試跑）、筆刷、打字中 -pev、FAWE 魔法選取
+# End-to-end: selection flash, -pev dry-run and apply, replace glass, gmask, always-preview (typing, Enter), brush,
+# typing -pev / --pev, carving, FAWE magic select
 . "$(dirname "$0")/lib.sh"
 cmd "gamemode creative $NAME"
 cmd "time set noon"
 cmd "gamerule doDaylightCycle false"
-# 場地：平坦世界，地面 y=-61（草）；清出空間，中間放 7×7 石頭
+# Arena: flat world, ground at y=-61 (grass); clear space, 7x7 stone in the middle
 for y in $(seq -60 -50); do cmd "fill -12 $y -12 12 $y 12 air"; done
 cmd "fill -12 -61 -12 12 -61 12 grass_block"
 cmd "fill -3 -60 -3 3 -60 3 stone"
 look 0 -60 -14 0 -58 0
 chat "/pev always off"
 chat "/pev style auto"
-chat "/pev box on"
+chat "/pev select on"
+chat "/pev carve on"
 chat "/pev clear"
 chat "//gmask"
 
-# 1. 選區（邊框交給其他插件，這裡不畫）
+# 1. Selection (no outlines or boxes: lines are left to other plugins) and the lime-glass selection flash
+chat "//desel"
 chat "//sel cuboid"
 chat "//pos1 -3,-60,-3"
 chat "//pos2 3,-56,3"
-ok no_selection_outline '[ "$(dbg outline)" = 0 ]'
+# 7x5x7 = 245, exposed shell = 245 - 5x3x5 = 170
+ok select_flash 'waitfor "[ \"\$(dbg source)\" = SELECTION ] && [ \"\$(dbg glass)\" = 170 ]" 3'
+ok no_entities '[ "$(dbg entities)" = 0 ]'
+ok select_world_untouched 'isblock 0 -58 0 air && isblock 0 -60 0 stone'
+shot 01-select-flash
+ok select_flash_ends 'waitfor "[ \"\$(dbg source)\" = NONE ]" 6'
+# independent of always-preview: can be turned off on its own
+chat "/pev select off"
+chat "//pos2 3,-55,3"
+sleep 1
+ok select_off '[ "$(dbg source)" = NONE ]'
+chat "/pev select on"
+chat "//pos2 3,-56,3"
+ok select_flash_again 'waitfor "[ \"\$(dbg source)\" = SELECTION ]" 3'
+ok select_flash_ends2 'waitfor "[ \"\$(dbg source)\" = NONE ]" 6'
 
-# 2. -pev：只試跑，顯示寫入後的方塊（不是玻璃）
+# 2. -pev: dry-run only, shows the resulting blocks (not glass)
 chat "//set oak_planks -pev"
 ok pev_source 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8'
 ok pev_blocks '[ "$(dbg fake)" -gt 0 ] && [ "$(dbg glass)" = 0 ]'
 ok pev_world_untouched 'isblock 0 -58 0 air && isblock 0 -60 0 stone'
-ok pev_box '[ "$(dbg box)" = 12 ] && [ "$(dbg outline)" -ge 12 ]'
+ok pev_no_lines '[ "$(dbg entities)" = 0 ]'
+# carving: the line of sight goes through the preview, so part of it is carved out (the full preview stays the same)
+ok carve 'waitfor "[ \"\$(dbg cut)\" -gt 0 ]" 3'
 shot 02-pev-set
-chat "/pev box off"
-ok box_off 'waitfor "[ \"\$(dbg outline)\" = 0 ]" 3 && [ "$(dbg fake)" -gt 0 ]'
-chat "/pev box on"
+chat "/pev carve off"
+ok carve_off 'waitfor "[ \"\$(dbg cut)\" = 0 ]" 3 && [ "$(dbg fake)" -gt 0 ]'
+chat "/pev carve on"
+ok carve_on 'waitfor "[ \"\$(dbg cut)\" -gt 0 ]" 3'
 
-# 3. 套用
+# 3. Apply
 chat "/pev apply"
 ok apply_written 'waitfor "isblock 3 -56 3 oak_planks" 6 && isblock 0 -60 0 oak_planks'
 ok apply_cleared '[ "$(dbg source)" = NONE ]'
-# 4. //undo 一次就回到原狀（試跑沒有留下歷史）
+# 4. One //undo restores everything (the dry-run left no history)
 chat "//undo"
 ok undo_once 'waitfor "isblock 0 -58 0 air" 6 && isblock 0 -60 0 stone'
 
-# 5. replace：綠色玻璃（只有 49 格石頭）
-chat "//replace stone gold_block -pev"
+# 5. replace: lime glass (only the 49 stone blocks)
+chat "//replace stone gold_block --pev"
 ok replace_glass 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && [ "$(dbg glass)" = 49 ]'
 ok replace_untouched 'isblock 0 -60 0 stone'
 shot 03-replace-glass
 chat "/pev clear"
 
-# 6. gmask：//set 也只動 gmask 符合的，且用玻璃
+# 6. gmask: //set only touches gmask matches, shown as glass
 chat "//gmask stone"
 chat "//set gold_block -pev"
 ok gmask_glass 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && [ "$(dbg glass)" = 49 ]'
 chat "/pev clear"
 
-# 7. 恆預覽：打字預覽 //set（尊重 gmask：只有 49 格，顯示真的方塊）
+# 7. Always-preview: typing //set (respects gmask: only 49 blocks, real blocks shown)
 chat "/pev always on"
 typeonly "//set glowstone"
 ok live_set_gmask 'waitfor "[ \"\$(dbg source)\" = LIVE ]" 5 && [ "$(dbg fake)" = 49 ] && [ "$(dbg glass)" = 0 ]'
@@ -63,7 +83,7 @@ typeonly "//set glowstone"
 ok live_set 'waitfor "[ \"\$(dbg fake)\" -gt 49 ]" 5 && [ "$(dbg glass)" = 0 ]'
 shot 04-live-set
 esc
-# 8. 打字預覽 //replace：打遮罩時是玻璃，打 pattern 時是真實預覽
+# 8. Typing //replace: glass while typing the mask, real blocks once the pattern is typed
 typeonly "//replace stone"
 ok live_mask 'waitfor "[ \"\$(dbg glass)\" = 49 ]" 5'
 shot 05-live-mask
@@ -77,7 +97,7 @@ ok always_apply 'waitfor "isblock 0 -60 0 diamond_block" 6'
 chat "//undo"
 ok always_undo 'waitfor "isblock 0 -60 0 stone" 6'
 
-# 9. 筆刷：瞄準就預覽（不寫入），真的刷下去照常寫入
+# 9. Brush: aiming previews (nothing written), a real stroke writes as usual
 chat "//sel"
 cmd "item replace entity $NAME weapon.mainhand with minecraft:blaze_rod"
 sync
@@ -94,28 +114,29 @@ chat "/pev always off"
 ok brush_off 'waitfor "[ \"\$(dbg source)\" = NONE ]" 3'
 cmd "item replace entity $NAME weapon.mainhand with minecraft:air"
 
-# 10. 不開恆預覽，打字打出 -pev 就預覽
+# 10. Without always-preview, typing -pev already previews
+chat "//desel"
 chat "//sel cuboid"
 chat "//pos1 -3,-60,-3"
 chat "//pos2 3,-56,3"
-typeonly "//set glowstone -pev"
+typeonly "//set glowstone --pev"
 ok typed_pev_set 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg fake)\" -gt 0 ]" 5 && [ "$(dbg glass)" = 0 ]'
 esc
 chat "/pev clear"
-# 一般指令（//walls）：停手後在攔截模式下試跑一次
+# Other commands (//walls): dry-run once in capture mode after typing pauses
 typeonly "//walls glowstone -pev"
 ok typed_pev_walls 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg fake)\" -ge 100 ]" 8 && [ "$(dbg armed)" = false ]'
 ok typed_pev_untouched 'isblock -3 -58 0 air && isblock 0 -58 -3 air'
 shot 09-typed-walls
-# 刪掉 -pev：預覽收掉
+# Deleting -pev clears the preview
 xdotool key BackSpace BackSpace BackSpace BackSpace BackSpace
 ok typed_pev_removed 'waitfor "[ \"\$(dbg source)\" = NONE ]" 5'
 esc
 ok typed_pev_untouched2 'isblock -3 -58 0 air'
 chat "/pev clear"
 
-# 11. FAWE 魔法選取（//sel fuzzy）：選到相連的 49 格石頭
-if grep -aq '預覽已啟用（FastAsyncWorldEdit）' "$LOG"; then
+# 11. FAWE magic select (//sel fuzzy): selects the 49 connected stone blocks
+if grep -aq 'Preview enabled (FastAsyncWorldEdit)' "$LOG"; then
   look 0 -60 -14 0 -58 0
   chat "//sel fuzzy"
   chat "//pos1 0,-60,0"

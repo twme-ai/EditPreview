@@ -1,13 +1,20 @@
-# 一次試跑最多收幾格（超過的寫入仍然不會寫進世界，只是不顯示）
+# Max blocks captured per dry-run (writes beyond this are still not written, just not shown)
 max-capture: 1000000
-# 最多送幾格假方塊給玩家（超過時留離玩家最近的）
+# Max fake blocks sent to a player (beyond this, the blocks nearest to the player are kept)
 max-display: 150000
-# 打字預覽：選區超過這個體積就暫停（按 Enter 仍會試跑）
+# Typing preview: paused when the selection is larger than this (Enter still dry-runs)
 live-max-volume: 262144
-# 筆刷預覽：筆刷大小超過這個就不預覽
+# Brush preview: not shown for brushes larger than this
 brush-max-size: 32
-# 新玩家的預設
+# Lime-glass flash when a selection is made
+selection-flash:
+  # duration in ticks (20 = 1 second)
+  ticks: 60
+  # selections larger than this don't flash
+  max-volume: 262144
+# Defaults for new players (each player can change them with /pev)
 defaults:
   always: false
-  box: true   # 預覽外圍的黃框與格數標籤
   brush: true
+  selection-flash: true # independent of always-preview
+  carve: true           # carve the preview around the player's line of sight and body

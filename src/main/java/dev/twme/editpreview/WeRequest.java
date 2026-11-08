@@ -7,11 +7,11 @@ import java.lang.reflect.Method;
 import java.util.function.Supplier;
 
 /**
- * 在 WorldEdit 的「請求」裡執行。
+ * Runs code inside a WorldEdit "request".
  * <p>
- * 遮罩與 pattern 解析時綁的是 RequestExtent：讀方塊時找目前請求的 EditSession，沒有就用請求的 world。
- * WorldEdit 7.4.6 起請求是 ScopedValue，指令之外沒有綁定就會丟 NoSuchElementException，
- * 要用 {@code Request.runWithRequest} 包起來；更早的版本與 FAWE 是 ThreadLocal，直接設定、用完 reset。
+ * Parsed masks and patterns are bound to RequestExtent: reads go to the current request's EditSession, or its world if none.
+ * Since WorldEdit 7.4.6 the request is a ScopedValue; outside a command it is unbound and throws NoSuchElementException,
+ * so wrap with {@code Request.runWithRequest}; older versions and FAWE use a ThreadLocal: set it directly and reset afterwards.
  */
 final class WeRequest {
   private WeRequest() {}
@@ -28,7 +28,7 @@ final class WeRequest {
     RUN_WITH = m;
   }
 
-  /** 在綁好 world、session 的請求裡執行 body。 */
+  /** Runs body in a request bound to world and session. */
   @SuppressWarnings("unchecked")
   static <T> T with(World world, LocalSession session, Supplier<T> body) {
     Object[] out = new Object[1];

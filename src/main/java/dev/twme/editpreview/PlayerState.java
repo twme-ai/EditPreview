@@ -1,21 +1,20 @@
 package dev.twme.editpreview;
 
 import dev.twme.editpreview.render.FakeView;
-import dev.twme.editpreview.render.Geo.Shape;
-import dev.twme.editpreview.render.Outline;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.Plugin;
 
-/** 一位玩家的預覽狀態。 */
+/** Preview state of one player. */
 final class PlayerState {
   enum Source {
     NONE,
-    /** 帶 -pev 或恆預覽下的指令試跑 */
+    /** Command dry-run (-pev or always-preview) */
     COMMAND,
-    /** 恆預覽：打字中的 //set、//replace */
+    /** Typing preview (//set, //replace, or any command with -pev) */
     LIVE,
-    /** 恆預覽：拿著筆刷瞄準 */
-    BRUSH
+    /** Always-preview: aiming a brush */
+    BRUSH,
+    /** Brief lime-glass flash of a newly made selection */
+    SELECTION
   }
 
   enum StyleMode {
@@ -25,50 +24,53 @@ final class PlayerState {
   }
 
   final Player player;
-  final Outline outline;
   final FakeView fake;
 
   boolean always;
-  boolean showBox = true;
   boolean brush = true;
+  /** Flash new selections as lime glass (independent of always-preview) */
+  boolean selectFlash = true;
+  /** Carve the preview around the player's line of sight and body */
+  boolean carve = true;
   StyleMode style = StyleMode.AUTO;
 
-  /** 上膛中的試跑（WE 的執行緒會讀） */
+  /** Selection flash: identity of the last seen selection (null = none) and when the flash ends (tick) */
+  String selKey;
+  boolean selSeen;
+  long flashUntil;
+
+  /** Armed dry-run (read from WorldEdit threads) */
   volatile Capture armed;
-  /** FAWE 要 //confirm 的大編輯：上膛後沒等到 EditSession，先記著，60 秒內打 //confirm 就接著試跑 */
+  /** Large FAWE edits that need //confirm: no EditSession arrived while armed, so keep it; //confirm within 60 s dry-runs it */
   Capture pendingConfirm;
   long pendingUntil;
 
-  /** 最後一次指令試跑（套用時重下） */
+  /** Last command dry-run (re-run on apply) */
   String lastCommand;
   Source source = Source.NONE;
-  Shape previewBox = Shape.empty();
-  /** 打字試跑還沒結束時玩家送出的真正指令：等試跑結束再送，免得被當成預覽吞掉 */
+  /** A real command sent while a typing dry-run was still running: sent after it finishes so it isn't swallowed as a preview */
   String queuedChat;
 
-  /** 打字預覽：聊天欄裡的指令（非同步的補全事件寫入） */
+  /** Typing preview: the command in the chat box (written by the async completion event) */
   volatile String typed;
   volatile long typedAt;
   String typedDone;
 
-  /** 筆刷預覽：上次算的目標與設定 */
+  /** Brush preview: target and settings of the last computation */
   String brushKey;
   int brushCooldown;
 
-  PlayerState(Plugin plugin, Player player) {
+  PlayerState(Player player) {
     this.player = player;
-    outline = new Outline(plugin, player);
     fake = new FakeView(player);
   }
 
   void clearPreview() {
     fake.clear();
-    previewBox = Shape.empty();
     source = Source.NONE;
   }
 
   void dispose() {
-    outline.clear();
     fake.forget();
   }
 }

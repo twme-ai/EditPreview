@@ -15,15 +15,15 @@ import java.util.Map;
 import org.bukkit.entity.Player;
 
 /**
- * 筆刷預覽：恆預覽開著、手上拿著 WorldEdit 筆刷時，照 BrushTool 的流程在瞄準的位置「刷一次」，
- * 但那個 EditSession 是自己建的，建立時用 {@link WeHook#FORCED} 只攔它——玩家真正刷下去的那一筆照常寫入。
+ * Brush preview: in always-preview, while holding a WorldEdit brush, follow BrushTool's flow and "stroke once" at the aimed block,
+ * but on our own EditSession, captured via {@link WeHook#FORCED} only — the player's real strokes are written as usual.
  */
 final class BrushPreview {
   private BrushPreview() {}
 
   record Out(Capture capture, String key) {}
 
-  /** 回傳 null＝手上不是筆刷或沒瞄準任何方塊。key 沒變時不重算（capture 為 null）。 */
+  /** Returns null if not holding a brush or not aiming at a block. Unchanged key → no recompute (capture is null). */
   static Out compute(Player p, String lastKey, int maxCapture, double maxSize) {
     LocalSession s = WorldEdit.getInstance().getSessionManager().getIfPresent(BukkitAdapter.adapt(p));
     return WeRequest.with(BukkitAdapter.adapt(p.getWorld()), s, () -> compute0(p, lastKey, maxCapture, maxSize));
@@ -75,7 +75,7 @@ final class BrushPreview {
       }
       brush.build(es, pos, bt.getMaterial(), size);
     } catch (Throwable t) {
-      // 筆刷自己的錯誤（超過上限等）：有收到多少就顯示多少
+      // errors from the brush itself (limits etc.): show whatever was captured
     }
     return new Out(cap, key);
   }

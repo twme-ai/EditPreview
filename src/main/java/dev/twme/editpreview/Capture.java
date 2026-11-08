@@ -5,33 +5,33 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 一次預覽：玩家下了帶 -pev（或恆預覽中）的指令後「上膛」，之後這個玩家的 EditSession 寫入都收進這裡，
- * 不寫進世界、也不進歷史紀錄。寫入可能來自 FAWE 的多條執行緒，所以同步。
+ * One preview: armed when a player sends a command with -pev (or in always-preview); that player's EditSession writes are then collected here
+ * instead of reaching the world or history. Writes may come from several FAWE threads, hence the synchronization.
  */
 public final class Capture {
   public enum Style {
-    /** 指令有遮罩或是 replace：綠色玻璃 */
+    /** The command has a mask or is a replace: lime glass */
     GLASS,
-    /** 一般：顯示寫入後的方塊 */
+    /** Default: show the resulting blocks */
     BLOCKS
   }
 
   final UUID player;
-  /** 去掉 -pev 後的指令（含開頭的 /），套用時重下 */
+  /** The command without -pev (with its leading /), re-run on apply */
   final String command;
   final Style style;
-  /** false＝只看不套用（/pev mask） */
+  /** false = view only, cannot be applied (/pev mask) */
   final boolean applicable;
-  /** true＝玩家明確要求（-pev、/pev ...）；恆預覽時沒有變更就不必提示 */
+  /** true = explicitly requested (-pev, /pev ...); in always-preview an empty result needs no message */
   final boolean explicit;
   final long created = System.currentTimeMillis();
   private final int max;
 
-  /** 位置鍵 → 寫入的狀態（原版：WorldEdit 的 BlockState；FAWE：狀態序號 Character） */
+  /** Position key → written state (vanilla: WorldEdit BlockState; FAWE: state ordinal as Character) */
   private final Map<Long, Object> writes = new HashMap<>();
   volatile long last = created;
   volatile boolean sessionSeen, overflow, committed;
-  /** 打字中（帶 -pev）自動試跑的：結果當成打字預覽顯示，不發聊天訊息 */
+  /** Auto dry-run while typing (with -pev): shown as a typing preview, no chat message */
   volatile boolean live;
 
   Capture(UUID player, String command, Style style, boolean applicable, boolean explicit, int max) {
