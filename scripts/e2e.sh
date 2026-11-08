@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# End-to-end: selection flash, -pev dry-run and apply, replace glass, gmask, always-preview (typing, Enter), brush,
-# typing -pev / --pev, carving, FAWE magic select
+# End-to-end: selection flash, -pev dry-run and apply, replace glass, gmask, always-preview (typing, Enter executes), brush,
+# typing -pev / --pev, carving, FAWE magic select, dry-run expiry
 . "$(dirname "$0")/lib.sh"
 cmd "gamemode creative $NAME"
 cmd "time set noon"
@@ -90,12 +90,16 @@ shot 05-live-mask
 typemore " diamond_block"
 ok live_pattern 'waitfor "[ \"\$(dbg glass)\" = 0 ] && [ \"\$(dbg fake)\" = 49 ]" 5'
 shot 06-live-pattern
+# Enter without -pev executes for real (no dry-run) and the live preview goes away
 xdotool key Return
-ok always_enter_preview 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && isblock 0 -60 0 stone'
-chat "/pev apply"
-ok always_apply 'waitfor "isblock 0 -60 0 diamond_block" 6'
+ok always_enter_executes 'waitfor "isblock 0 -60 0 diamond_block" 8'
+ok always_enter_cleared 'waitfor "[ \"\$(dbg source)\" = NONE ] && [ \"\$(dbg armed)\" = false ]" 5'
 chat "//undo"
 ok always_undo 'waitfor "isblock 0 -60 0 stone" 6'
+# with -pev it still only dry-runs
+chat "//set glowstone -pev"
+ok always_pev_dryrun 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8 && isblock 0 -60 0 stone && isblock 0 -58 0 air'
+chat "/pev clear"
 
 # 9. Brush: aiming previews (nothing written), a real stroke writes as usual
 chat "//sel"
@@ -151,4 +155,16 @@ if grep -aq 'Preview enabled (FastAsyncWorldEdit)' "$LOG"; then
   chat "/pev always off"
   chat "//sel cuboid"
 fi
+
+# 12. Dry-run previews expire after dry-run-timeout (15 s) without writing anything
+chat "//pos1 -3,-60,-3"
+chat "//pos2 3,-56,3"
+chat "//set oak_planks --pev"
+ok expire_start 'waitfor "[ \"\$(dbg source)\" = COMMAND ]" 8'
+T0=$(date +%s)
+ok expire_kept 'sleep 10; [ "$(dbg source)" = COMMAND ]'
+ok expire_cleared 'waitfor "[ \"\$(dbg source)\" = NONE ]" 10 && [ $(( $(date +%s) - T0 )) -ge 13 ] && [ "$(dbg last)" = null ]'
+ok expire_untouched 'isblock 0 -58 0 air && isblock 0 -60 0 stone'
+chat "/pev apply"
+ok expire_no_apply 'sleep 1; isblock 0 -58 0 air'
 done_

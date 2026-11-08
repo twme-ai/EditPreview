@@ -38,6 +38,8 @@ final class PlayerState {
   String selKey;
   boolean selSeen;
   long flashUntil;
+  /** Dry-run preview (COMMAND) expires at this tick (0 = never) */
+  long commandUntil;
 
   /** Armed dry-run (read from WorldEdit threads) */
   volatile Capture armed;

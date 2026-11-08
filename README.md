@@ -16,14 +16,15 @@ Previews are sent only to the player who made them (fake blocks), never touch th
 
 - **`-pev` / `--pev` dry-run**: append `-pev` (or `--pev`) to any block-changing WorldEdit command
   (e.g. `//set stone -pev`, `//replace dirt grass_block --pev`). The command runs as usual, but every write is intercepted
-  and shown as a preview instead, with **[Apply]** / **[Cancel]** buttons.
+  and shown as a preview instead, with **[Apply]** / **[Cancel]** buttons. The preview disappears after 15 seconds
+  (`dry-run-timeout`). Commands without the flag always run for real.
   - **Preview while typing**: as soon as `-pev` appears in the chat box (before Enter), the preview starts.
     `//set` and `//replace` update on every keystroke; other commands (`//walls`, `//stack`, `//smooth`, …) are dry-run
     once in capture mode after typing pauses for 0.6 s. Deleting `-pev` clears the preview.
     Commands that change the clipboard (`//cut`) or move the selection with `-s` (`//move`, `//stack`, `//paste`)
     are not dry-run while typing; press Enter to dry-run them.
-- **Always-preview** (`/pev always on`): no flag needed; every WorldEdit edit command is dry-run first and only written
-  when you click [Apply].
+- **Always-preview** (`/pev always on`): live previews without typing the flag. Pressing Enter still runs the command
+  for real; add `-pev` / `--pev` when you want a dry-run.
   - **Live typing preview**: typing `//set <pattern>` shows the pattern result live; typing `//replace <mask>` marks the
     blocks that would be replaced in lime glass, and once you type `<pattern>` it becomes a real block preview.
   - **Brush**: holding a brush and aiming shows the result of that stroke; clicking writes as usual.
@@ -44,7 +45,7 @@ Permission `editpreview.use` (everyone by default). Settings are stored in the p
 
 | Command | Description |
 |---|---|
-| `/pev always [on\|off]` | Always-preview |
+| `/pev always [on\|off]` | Always-preview (live typing and brush previews; Enter still executes) |
 | `/pev brush [on\|off]` | Brush preview |
 | `/pev select [on\|off]` | Lime-glass flash of new selections |
 | `/pev carve [on\|off]` | Carve the preview around your line of sight and body |
@@ -67,6 +68,7 @@ max-capture: 1000000     # max blocks captured per dry-run (beyond this still no
 max-display: 150000      # max fake blocks sent (beyond this, the blocks nearest to the player are kept)
 live-max-volume: 262144  # typing preview pauses above this selection volume (Enter still dry-runs)
 brush-max-size: 32       # brushes larger than this are not previewed
+dry-run-timeout: 15      # seconds before a dry-run preview disappears (0 = keep until cleared)
 selection-flash:
   ticks: 60              # flash duration (20 ticks = 1 second)
   max-volume: 262144     # larger selections don't flash
@@ -86,8 +88,8 @@ defaults:                # per-player defaults
   - FAWE: at `BEFORE_CHANGE` the queue is located and an `IBatchProcessor` (scope `CUSTOM`: after masks, before
     history) records each chunk's writes and then empties the batch, so neither the world nor history changes.
     Falls back to `CaptureExtent` if no queue is found.
-- **Trigger**: `PlayerCommandPreprocessEvent` detects `-pev` / `--pev` (or always-preview), strips the flag and lets the
-  command run; [Apply] re-runs the original command without the flag.
+- **Trigger**: `PlayerCommandPreprocessEvent` detects `-pev` / `--pev`, strips the flag and lets the command run in
+  capture mode; [Apply] re-runs the original command without the flag.
 - **Typing preview**: the client requests completions on every keystroke; `AsyncTabCompleteEvent` provides the current
   chat buffer, and after a 250 ms pause it is evaluated on the selection with WorldEdit's mask / pattern parsers.
 - **Brush preview**: follows `BrushTool` (aim, size, material, mask) with its own EditSession calling `brush.build`,
@@ -113,7 +115,7 @@ defaults:                # per-player defaults
 ```sh
 ./gradlew build           # build/libs/EditPreview-<version>.jar
 scripts/restart.sh        # deploy to the test server and restart server + client
-scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 39 checks; WorldEdit 7.4.6: 37, FAWE-only checks skipped)
+scripts/e2e.sh            # end-to-end tests (FAWE 2.16.1: 45 checks; WorldEdit 7.4.6: 43, FAWE-only checks skipped)
 ```
 
 The test scripts need a local Paper test server, a Minecraft client, Xvfb and xdotool; paths are in `scripts/env.sh`.

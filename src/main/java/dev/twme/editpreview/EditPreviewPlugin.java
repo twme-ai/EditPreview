@@ -41,12 +41,12 @@ import org.bukkit.plugin.java.JavaPlugin;
 /**
  * Block previews for WorldEdit / FAWE:
  * <ul>
- *   <li>Add -pev (or --pev) to a command, or turn on always-preview (/pev always): the command only dry-runs, the result is
- *       shown with fake blocks, and nothing is written until [Apply]. Masks and replace show lime glass.
+ *   <li>Add -pev (or --pev) to a command: the command only dry-runs, the result is shown with fake blocks, and nothing is
+ *       written until [Apply]. Masks and replace show lime glass. Without the flag, commands always run for real.
  *   <li>A newly made selection (any shape) briefly flashes as lime glass (/pev select).
  *   <li>Fake blocks are carved around the player's line of sight and body, so the preview never blocks clicking (/pev carve).
- *   <li>Typing -pev in chat (before pressing Enter) already previews; in always-preview, //set and //replace preview while
- *       typing, and holding a brush previews the stroke at the aimed block.
+ *   <li>Typing -pev in chat (before pressing Enter) already previews; in always-preview (/pev always), //set and //replace
+ *       preview while typing (Enter still executes) and holding a brush previews the stroke at the aimed block.
  * </ul>
  */
 public final class EditPreviewPlugin extends JavaPlugin implements Listener, TabExecutor {
@@ -73,7 +73,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
   private final Map<UUID, PlayerState> states = new ConcurrentHashMap<>();
   private WeHook hook;
   private boolean fawe;
-  private int maxCapture, maxDisplay, liveMax, flashTicks, flashMax;
+  private int maxCapture, maxDisplay, liveMax, flashTicks, flashMax, dryRunTicks;
   private double brushMax;
   private long tick;
   private NamespacedKey kAlways, kBrush, kStyle, kSelect, kCarve;
@@ -86,6 +86,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     liveMax = getConfig().getInt("live-max-volume", 262_144);
     brushMax = getConfig().getDouble("brush-max-size", 32);
     flashTicks = getConfig().getInt("selection-flash.ticks", 60);
+    dryRunTicks = (int) Math.round(getConfig().getDouble("dry-run-timeout", 15) * 20);
     flashMax = getConfig().getInt("selection-flash.max-volume", 262_144);
     kAlways = new NamespacedKey(this, "always");
     kBrush = new NamespacedKey(this, "brush");
@@ -255,7 +256,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
       }
       return;
     }
-    if (!flag && !st.always) return;
+    if (!flag) return; // without -pev, commands run for real (even in always-preview; its live preview is cleared once sent)
     if (NON_EDIT.contains(label) || label.startsWith("/sel") || label.startsWith("/br")) return;
     if (NEVER.contains(label)) {
       if (flag) {
@@ -306,6 +307,11 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         else if ((!st.always || !st.brush) && st.source == PlayerState.Source.BRUSH) st.clearPreview();
         if (tick % 4 == 0) selection(st);
         if (st.source == PlayerState.Source.SELECTION && tick >= st.flashUntil) st.clearPreview();
+        if (st.source == PlayerState.Source.COMMAND && st.commandUntil > 0 && tick >= st.commandUntil) {
+          st.clearPreview();
+          st.lastCommand = null;
+          st.player.sendActionBar(Component.text("Preview expired (nothing was written)", NamedTextColor.GRAY));
+        }
         if (tick % 2 == 0) st.fake.carve();
         st.fake.flush();
       } catch (Throwable t) {
@@ -392,6 +398,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
     Build.Result r = Build.build(writes, style, loc.getX(), loc.getY(), loc.getZ(), maxDisplay);
     st.fake.show(p.getWorld(), r.fake());
     st.source = src;
+    st.commandUntil = src == PlayerState.Source.COMMAND && dryRunTicks > 0 ? tick + dryRunTicks : 0;
     if (r.truncated()) p.sendActionBar(Component.text("Preview too large: showing only the " + String.format("%,d", maxDisplay) + " blocks nearest to you", NamedTextColor.GOLD));
   }
 
@@ -565,7 +572,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
         }
         save(st);
         info(p, Component.text("Always-preview: " + (st.always
-                ? "on (WorldEdit commands only dry-run until you click [Apply]; typing and brushes preview live)" : "off"),
+                ? "on (typing //set, //replace and aiming brushes preview live; Enter still executes)" : "off"),
             st.always ? NamedTextColor.GREEN : NamedTextColor.GRAY));
       }
       case "select" -> {
@@ -665,7 +672,7 @@ public final class EditPreviewPlugin extends JavaPlugin implements Listener, Tab
 
   private void help(Player p, PlayerState st) {
     String[][] lines = {
-        {"/pev always [on|off]", "Always-preview: WorldEdit commands only dry-run; //set, //replace and brushes preview live (now "
+        {"/pev always [on|off]", "Always-preview: //set, //replace and brushes preview live while typing / aiming; Enter still executes (now "
             + onOff(st.always) + ")"},
         {"<WorldEdit command> -pev", "Dry-run just this command (--pev works too; previews while typing)"},
         {"/pev apply", "Run the last dry-run for real"},

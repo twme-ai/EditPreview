@@ -6,6 +6,8 @@ max-display: 150000
 live-max-volume: 262144
 # Brush preview: not shown for brushes larger than this
 brush-max-size: 32
+# Dry-run previews (-pev / --pev, /pev mask, /pev pattern) disappear after this many seconds (0 = keep until cleared)
+dry-run-timeout: 15
 # Lime-glass flash when a selection is made
 selection-flash:
   # duration in ticks (20 = 1 second)
