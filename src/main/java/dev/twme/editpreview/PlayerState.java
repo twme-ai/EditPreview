@@ -43,6 +43,8 @@ final class PlayerState {
   String lastCommand;
   Source source = Source.NONE;
   Shape previewBox = Shape.empty();
+  /** 打字試跑還沒結束時玩家送出的真正指令：等試跑結束再送，免得被當成預覽吞掉 */
+  String queuedChat;
 
   /** 打字預覽：聊天欄裡的指令（非同步的補全事件寫入） */
   volatile String typed;
