@@ -156,9 +156,9 @@ typeonly "//walls glowstone -pev"
 ok typed_pev_walls 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg fake)\" -ge 100 ]" 8 && [ "$(dbg armed)" = false ]'
 ok typed_pev_untouched 'isblock -3 -58 0 air && isblock 0 -58 -3 air'
 shot 09-typed-walls
-# Deleting -pev clears the preview
+# Deleting -pev: looks like moving the cursor left (the client sends the same), so the preview stays until it expires (5 s)
 xdotool key BackSpace BackSpace BackSpace BackSpace BackSpace
-ok typed_pev_removed 'waitfor "[ \"\$(dbg source)\" = NONE ]" 5'
+ok typed_pev_removed 'waitfor "[ \"\$(dbg source)\" = NONE ]" 9'
 esc
 ok typed_pev_untouched2 'isblock -3 -58 0 air'
 chat "/pev clear"
@@ -202,4 +202,45 @@ chat "/pev apply"
 ok expire_zero_apply 'waitfor "isblock 0 -58 0 oak_planks" 6'
 chat "//undo"
 ok expire_zero_undo 'waitfor "isblock 0 -58 0 air" 6'
+
+# 13. Typed (not yet sent) -pev previews also expire (default 5 s, -pev N), and clear when the selection changes
+chat "/pev clear"
+look 0 -60 -14 0 -58 0
+typeonly "//set glowstone -pev"
+ok typed_expire_start 'waitfor "[ \"\$(dbg source)\" = LIVE ]" 5'
+T0=$(date +%s)
+ok typed_expire_default 'waitfor "[ \"\$(dbg source)\" = NONE ]" 8 && [ $(( $(date +%s) - T0 )) -ge 3 ]'
+ok typed_expire_stays 'sleep 1.5; [ "$(dbg source)" = NONE ]'
+typemore " 12"
+ok typed_n_start 'waitfor "[ \"\$(dbg source)\" = LIVE ]" 5'
+ok typed_n_kept 'sleep 7; [ "$(dbg source)" = LIVE ]'
+ok typed_n_cleared 'waitfor "[ \"\$(dbg source)\" = NONE ]" 8'
+esc
+chat "/pev clear"
+typeonly "//set glowstone -pev 0"
+ok typed_zero_start 'waitfor "[ \"\$(dbg source)\" = LIVE ]" 5'
+esc
+ok typed_zero_kept 'sleep 7; [ "$(dbg source)" = LIVE ]'
+# change the selection with the wand (right click sets pos2): the unsent preview disappears
+cmd "item replace entity $NAME weapon.mainhand with minecraft:wooden_axe"
+look 0 -60 -14 0.5 -60.1 -11.5
+sync
+xdotool click 3
+ok typed_selection_clears 'waitfor "[ \"\$(dbg source)\" = NONE ] || [ \"\$(dbg source)\" = SELECTION ]" 4'
+ok typed_world_untouched 'isblock 0 -58 0 air && isblock 0 -60 0 stone'
+cmd "item replace entity $NAME weapon.mainhand with minecraft:air"
+chat "//pos2 3,-56,3"
+chat "/pev clear"
+
+# 14. Editing an argument in front of an already typed -pev (the client only sends the text up to the cursor)
+typeonly "//set glowstone -pev 0"
+ok mid_start 'waitfor "[ \"\$(dbg source)\" = LIVE ]" 5'
+xdotool key Left Left Left Left Left Left Left; sleep 0.3
+xdotool key BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace BackSpace
+xdotool type --delay 40 "gold_block"
+ok mid_edit 'waitfor "dbg source >/dev/null; grep -a PEV_DEBUG \"\$LOG\" | tail -1 | grep -qF \"typed=//set gold_block -pev 0 liveError=\" && [ \"\$(dbg source)\" = LIVE ]" 6'
+shot 12-mid-edit
+ok mid_untouched 'isblock 0 -58 0 air'
+esc
+chat "/pev clear"
 done_
