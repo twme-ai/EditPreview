@@ -7,14 +7,17 @@
 - Paper 1.21.x（使用 `AsyncTabCompleteEvent`、`sendMultiBlockChange`），Java 21
 - WorldEdit 7.4+ 或 FastAsyncWorldEdit 2.x（擇一）
 
-| 試跑 `//set` | `//replace` 遮罩（綠玻璃） | 筆刷 | 魔法選取（FAWE） |
-|---|---|---|---|
-| ![](docs/pev-set.png) | ![](docs/replace-glass.png) | ![](docs/brush.png) | ![](docs/fuzzy.png) |
+| 試跑 `//set` | `//replace` 遮罩（綠玻璃） | 筆刷 | 魔法選取（FAWE） | 打字中 `-pev` |
+|---|---|---|---|---|
+| ![](docs/pev-set.png) | ![](docs/replace-glass.png) | ![](docs/brush.png) | ![](docs/fuzzy.png) | ![](docs/typed-walls.png) |
 
 ## 功能
 
 - **`-pev` 試跑**：任何會改方塊的 WorldEdit 指令後面加 `-pev`（例如 `//set stone -pev`、`//replace dirt grass_block -pev`），
   指令照常執行但寫入全被攔下，改成預覽，並給出 **[套用]**／**[取消]** 按鈕。黃色框標出受影響範圍。
+  - **打字時就預覽**：在聊天欄打出 `-pev`（還沒按 Enter）就開始預覽。`//set`、`//replace` 每打一個字即時更新；
+    其他指令（`//walls`、`//stack`、`//smooth`…）停手 0.6 秒後在攔截模式下試跑一次。刪掉 `-pev` 預覽就收掉。
+    會改剪貼簿（`//cut`）或帶 `-s` 移動選區（`//move`、`//stack`、`//paste`）的指令不在打字時試跑，按 Enter 才試跑。
 - **恆預覽**（`/pev always on`）：不用加 `-pev`，WorldEdit 編輯指令一律先試跑，按 [套用] 才真的寫入。
   - **打字即時預覽**：在聊天欄打 `//set <pattern>` 時即時顯示 pattern 結果；
     打 `//replace <遮罩>` 時用綠色玻璃標出會被取代的方塊，接著打 `<pattern>` 就變成真實方塊預覽。
@@ -41,7 +44,8 @@
 | `/pev pattern <pattern>` | 預覽選區套上 pattern 的樣子，可直接 [套用 //set] |
 | `/pev help` | 說明 |
 
-不會被攔的指令：`//undo`、`//redo`、選區／筆刷／工具／遮罩設定等不改方塊的指令。
+不會被攔的指令：`//undo`、`//redo`、選區／筆刷／工具／遮罩設定、傳送（`/up`、`/ascend`…）等不改方塊的指令。
+不能預覽的指令：`//butcher`、`//remove`（移除實體不經過方塊寫入，攔不下來；加 `-pev` 會被擋下）。
 
 ## 設定（config.yml）
 
@@ -71,6 +75,7 @@ defaults: { always: false, box: true, brush: true }
 
 - 預覽是「跑一次指令」，`//set` 這類 pattern 若含隨機成分，[套用] 時會重新隨機。
 - 不預覽實體與生物群系的變更。
+- 打字試跑會真的執行指令（只是不寫入），所以聊天欄會出現 WorldEdit 的訊息；參數打到一半時也可能出現錯誤訊息。
 - 試跑時 WorldEdit／FAWE 仍會印出「Operation completed (N)」「history: N changed」等訊息，那只是指令自己的計數，世界與歷史都沒有變。
 - 假方塊在玩家點擊、chunk 重載時可能被客戶端換回真實方塊；`/pev clear` 會還原。
 
@@ -79,7 +84,7 @@ defaults: { always: false, box: true, brush: true }
 ```sh
 ./gradlew build           # build/libs/EditPreview-<版本>.jar
 scripts/restart.sh        # 部署到測試伺服器並重開伺服器＋客戶端
-scripts/e2e.sh            # 端對端測試（FAWE 2.16.1：26 項，含魔法選取；原版 WorldEdit 會跳過 FAWE 專屬項目）
+scripts/e2e.sh            # 端對端測試（FAWE 2.16.1：31 項；原版 WorldEdit 7.4.6：29 項，跳過 FAWE 專屬項目）
 ```
 
 測試腳本需要本機的 Paper 測試伺服器、Minecraft 客戶端、Xvfb 與 xdotool，路徑在 `scripts/env.sh`。

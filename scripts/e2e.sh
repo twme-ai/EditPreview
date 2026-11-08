@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 端對端：-pev 試跑與套用、replace 玻璃、gmask、恆預覽（打字、Enter 試跑）、筆刷
+# 端對端：-pev 試跑與套用、replace 玻璃、gmask、恆預覽（打字、Enter 試跑）、筆刷、打字中 -pev、FAWE 魔法選取
 . "$(dirname "$0")/lib.sh"
 cmd "gamemode creative $NAME"
 cmd "time set noon"
@@ -94,7 +94,27 @@ chat "/pev always off"
 ok brush_off 'waitfor "[ \"\$(dbg source)\" = NONE ]" 3'
 cmd "item replace entity $NAME weapon.mainhand with minecraft:air"
 
-# 10. FAWE 魔法選取（//sel fuzzy）：選到相連的 49 格石頭
+# 10. 不開恆預覽，打字打出 -pev 就預覽
+chat "//sel cuboid"
+chat "//pos1 -3,-60,-3"
+chat "//pos2 3,-56,3"
+typeonly "//set glowstone -pev"
+ok typed_pev_set 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg fake)\" -gt 0 ]" 5 && [ "$(dbg glass)" = 0 ]'
+esc
+chat "/pev clear"
+# 一般指令（//walls）：停手後在攔截模式下試跑一次
+typeonly "//walls glowstone -pev"
+ok typed_pev_walls 'waitfor "[ \"\$(dbg source)\" = LIVE ] && [ \"\$(dbg fake)\" -ge 100 ]" 8 && [ "$(dbg armed)" = false ]'
+ok typed_pev_untouched 'isblock -3 -58 0 air && isblock 0 -58 -3 air'
+shot 09-typed-walls
+# 刪掉 -pev：預覽收掉
+xdotool key BackSpace BackSpace BackSpace BackSpace BackSpace
+ok typed_pev_removed 'waitfor "[ \"\$(dbg source)\" = NONE ]" 5'
+esc
+ok typed_pev_untouched2 'isblock -3 -58 0 air'
+chat "/pev clear"
+
+# 11. FAWE 魔法選取（//sel fuzzy）：選到相連的 49 格石頭
 if grep -aq '預覽已啟用（FastAsyncWorldEdit）' "$LOG"; then
   look 0 -60 -14 0 -58 0
   chat "//sel fuzzy"

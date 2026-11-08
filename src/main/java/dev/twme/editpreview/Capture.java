@@ -31,6 +31,8 @@ public final class Capture {
   private final Map<Long, Object> writes = new HashMap<>();
   volatile long last = created;
   volatile boolean sessionSeen, overflow, committed;
+  /** 打字中（帶 -pev）自動試跑的：結果當成打字預覽顯示，不發聊天訊息 */
+  volatile boolean live;
 
   Capture(UUID player, String command, Style style, boolean applicable, boolean explicit, int max) {
     this.player = player;
